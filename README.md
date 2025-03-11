@@ -10,7 +10,7 @@
   
 3) Allow package installations from conda-forge channel
 ```
-conda config –add channels conda-forge
+conda config -–add channels conda-forge
 conda config –set channel_priority strict
 ```
 
@@ -23,8 +23,10 @@ cd [PATH_TO_PARENT_FOLDER]
 5) Install ```git``` package, clone the GitHub repository to a new folder on your computer, then set the current directory to the new folder with all the code files
 ```
 conda install git
-git clone https://github.com/fear-the-kraken/Farrell-Lab [FOLDER_NAME]
+git clone https://github.com/Farrell-Laboratory/Toothy [FOLDER_NAME]
 cd [FOLDER_NAME]
+
+Alternatively, you can download the .zip file manually from GitHub.
 ```
 
 6) Create a new Anaconda environment running Python 3.9 for the Toothy application, then activate your new environment
