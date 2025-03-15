@@ -48,6 +48,18 @@ def get_tetrode_func(site_spacing, tet_shape):
     return dist, fx
 
 
+def get_contact_shape_kwargs(el_shape, el_h, el_w):
+    probe_contact_shape = str(el_shape)
+    if probe_contact_shape == 'circle': 
+        shape_kw = dict(radius=el_h/2)
+    elif probe_contact_shape == 'square': 
+        shape_kw = dict(width=el_h)
+    elif probe_contact_shape in ['rect','rectangle']:
+        shape_kw = dict(width=el_w, height=el_h)
+        probe_contact_shape = 'rect'  # must be 'rect' to set contacts
+    return probe_contact_shape, shape_kw
+
+
 def return_valid_probe(arg, use_dummy=False, skip_loading=False):
     """ Return valid probe from input or using dummy """
     probe = None
@@ -59,7 +71,7 @@ def return_valid_probe(arg, use_dummy=False, skip_loading=False):
         except:
             if skip_loading==False:
                 # open file dialog
-                dlg = gi.FileDialog(init_ddir=ephys.base_dirs()[2], is_probe=True)
+                dlg = gi.FileDialog(init_ddir=ephys.base_dirs()[1], is_probe=True)
                 res = dlg.exec()
                 if res:
                     fpath = dlg.selectedFiles()[0]
@@ -184,13 +196,13 @@ class probesimple(QtWidgets.QWidget):
                      cmap = cmap,
                      el_w = self.elw_w.value(),
                      el_h = self.elh_w.value(),
-                     el_shape = self.elshape_w.currentText().replace('angle','').lower())
+                     el_shape = self.elshape_w.currentText().lower())
         return ddict
         
     
     def enable_ccm_btn(self):
         # symmetrical contacts (i.e. circles/squares) use electrode height only
-        shape = self.elshape_w.currentText().replace('angle','').lower()
+        shape = self.elshape_w.currentText().lower()
         is_sym = bool(shape in ['circle', 'square'])
         self.elw_w.setEnabled(not is_sym)
         if is_sym:
@@ -252,13 +264,10 @@ class probesimple(QtWidgets.QWidget):
         if all(PP.cmap == np.arange(PP.xc.size)):
             df['chanMap'] = sorted(df['chanMap'].values)
         # get contact shape/size
-        if   PP.el_shape == 'circle': shape_kw = dict(radius=PP.el_h/2)
-        elif PP.el_shape == 'square': shape_kw = dict(width=PP.el_w)
-        elif PP.el_shape == 'rect'  : shape_kw = dict(width=PP.el_w, height=PP.el_h)
-        
-        # initialize probe data object findme
+        contact_shapes, shape_kw = get_contact_shape_kwargs(PP.el_shape, el_h=PP.el_h, el_w=PP.el_w)
+        # initialize probe data object
         probe = prif.Probe(ndim=2, name=PP.probe_name)
-        probe.set_contacts(np.array(df[['xc','yc']]), shapes=PP.el_shape, 
+        probe.set_contacts(np.array(df[['xc','yc']]), shapes=contact_shapes, 
                            shape_params=shape_kw, shank_ids=df.shank)
         probe.create_auto_shape('tip', margin=20)
         self.probe = prif.combine_probes([probe])
@@ -284,7 +293,7 @@ class probesimple(QtWidgets.QWidget):
             elh, elw = [shank.contact_shape_params[0]['radius'] * 2] * 2
         elif shape=='square':
             elh, elw = [shank.contact_shape_params[0]['width']] * 2
-        elif shape=='rect':
+        elif shape.startswith('rect'):
             elw, elh = [shank.contact_shape_params[0][k] for k in ['width','height']]
             shape='rectangle'
         pyfx.stealthy(self.elh_w.qw, elh)
@@ -304,14 +313,12 @@ class probething(QtWidgets.QWidget):
         self.mainWin = mainWin
         self.kwargs = kwargs
         self.SHOW_GENERATE_BTN = bool(show_generate_btn)
-        ephys.read_param_file(ephys.base_dirs()[4])
-        #findme
         
         self.gen_layout()
         self.connect_signals()
         
-        self.generate_btn = QtWidgets.QPushButton('Generate probe')
-        self.generate_btn.clicked.connect(self.generate_probe)
+        self.generate_btn = QtWidgets.QPushButton('Construct probe')
+        self.generate_btn.clicked.connect(self.construct_probe)
         self.generate_btn.setEnabled(False)
         self.generate_btn.setVisible(self.SHOW_GENERATE_BTN)
         #self.layout.addWidget(self.generate_btn)
@@ -515,8 +522,8 @@ class probething(QtWidgets.QWidget):
         # set default values if given
         self.elh_w.qw.setValue(self.kwargs.get('el_h', self.elh_w.qw.value()))
         self.elw_w.qw.setValue(self.kwargs.get('el_w', self.elw_w.qw.value()))
-        if 'el_shape' in self.kwargs and self.kwargs['el_shape'] in ['circle','square','rect']: 
-            self.elshape_w.setCurrentIndex(['circle','square','rect'].index(self.kwargs['el_shape']))
+        if 'el_shape' in self.kwargs and self.kwargs['el_shape'] in ['circle','square','rectangle']: 
+            self.elshape_w.setCurrentText(self.kwargs['el_shape'].capitalize())
         contact_hlay.addWidget(self.elh_w)
         contact_hlay.addWidget(self.elw_w)
         contact_hlay.addWidget(self.elshape_w)
@@ -665,36 +672,36 @@ class probething(QtWidgets.QWidget):
         self.check_signal.emit()
     
     
-    def generate_probe(self):
+    def construct_probe(self):
+        """ Create probe object from current parameters (probething) """
         PP = pd.Series(self.ddict_from_gui())
         # get config
         is_poly, is_tet = [PP.config == pc for pc in ['Polytrode','Tetrode']]
         is_lin = bool(not (is_poly or is_tet))
         # get contact shape/size
-        if   PP.el_shape == 'circle': shape_kw = dict(radius=PP.el_h/2)
-        elif PP.el_shape == 'square': shape_kw = dict(width=PP.el_w)
-        elif PP.el_shape == 'rect'  : shape_kw = dict(width=PP.el_w, height=PP.el_h)
+        contact_shapes, shape_kw = get_contact_shape_kwargs(PP.el_shape, el_h=PP.el_h, el_w=PP.el_w)
         
         shank_list = []
         for i in range(PP.nshanks):
             nch_shank = PP.ch_per_shank[i]  # no. channels on shank (int)
             nch_cols = PP.ch_per_col[i]     # no. channels for each column (list)
+            istart = sum(PP.ch_per_shank[0:i]) # no. channels on previous shanks
             
             ### linear probe shank
             if is_lin:
                 # initialize probe, adjust y-values by tip offset
                 prb = prif.generate_linear_probe(num_elec=nch_shank, ypitch=PP.dy)
                 pos_adj = prb.contact_positions[::-1] + np.array([0, PP.tip_offset[0]])
-                prb.set_contacts(pos_adj, shapes=PP.el_shape, shape_params=shape_kw)
+                prb.set_contacts(pos_adj, shapes=contact_shapes, shape_params=shape_kw)
             ### polytrode probe shank
             elif is_poly:
                 prb = prif.generate_multi_columns_probe(num_columns=PP.ncols,
                                                         num_contact_per_column=nch_cols,
                                                         xpitch=PP.dx, ypitch=PP.dy,
-                                                        y_shift_per_column=PP.tip_offset)#
+                                                        y_shift_per_column=PP.tip_offset)
                 xv,yv = np.array(prb.contact_positions.T)
                 yv2 = np.concatenate([yv[np.where(xv==val)[0]][::-1] for val in np.unique(xv)])
-                prb.set_contacts(np.array([xv, yv2]).T, shapes=PP.el_shape, shape_params=shape_kw)
+                prb.set_contacts(np.array([xv, yv2]).T, shapes=contact_shapes, shape_params=shape_kw)
             ### tetrode probe shank
             elif is_tet:
                 dix, diy = PP.dx/2, PP.diy/2
@@ -710,12 +717,12 @@ class probething(QtWidgets.QWidget):
                 
                 # create probe
                 prb = prif.Probe(ndim=2)
-                prb.set_contacts(tet_coors, shapes=PP.el_shape, shape_params=shape_kw)
+                prb.set_contacts(tet_coors, shapes=contact_shapes, shape_params=shape_kw)
                 
             # set shank IDs, contact IDs
             prb.set_shank_ids(np.ones(nch_shank, dtype='int') + i)
-            prb.set_contact_ids(np.arange(nch_shank) + sum(PP.ch_per_shank[0:i]))
-            prb.set_device_channel_indices(np.array(PP.dev_idx) + sum(PP.ch_per_shank[0:i]))
+            prb.set_contact_ids(np.arange(nch_shank) + istart)
+            prb.set_device_channel_indices(np.array(PP.dev_idx[istart : istart+nch_shank]))
             prb.create_auto_shape('tip', margin=20)
             prb.move([PP.shank_spacing * i, 0])
             shank_list.append(prb)
@@ -726,7 +733,6 @@ class probething(QtWidgets.QWidget):
         self.probe.set_contact_ids(contact_ids)
         self.probe.set_device_channel_indices(dev_indexes)
         shank_spacing = PP.shank_spacing if PP.nshanks > 1 else 0
-        
         self.probe.annotate(**{'name'          : PP.probe_name,
                                'shank_spacing' : shank_spacing,
                                'config' : PP.config,
@@ -758,7 +764,7 @@ class probething(QtWidgets.QWidget):
         # get electrode contact dimensions
         el_w = self.elw_w.value()
         el_h = self.elh_w.value()
-        el_shape = self.elshape_w.currentText().replace('angle','').lower()
+        el_shape = self.elshape_w.currentText().lower()
         # get channel map (default=depth order)
         dev_idx = np.arange(nch)
         if self.chmap_gbox.isChecked():
@@ -1223,7 +1229,7 @@ class probegod(QtWidgets.QWidget):
     def generate_probe(self):
         """ Generate new probe using current probe widget """
         if self.SOURCE == 0:
-            self.probething.generate_probe()
+            self.probething.construct_probe()
             self.probe = self.probething.probe
         elif self.SOURCE == 1:
             self.probesimple.construct_probe()
@@ -1261,3 +1267,7 @@ class probegod(QtWidgets.QWidget):
         if res:
             return my_probegod.probe
         return
+
+if __name__ == '__main__':
+    pyfx.qapp()
+    probegod.run_probe_window()
