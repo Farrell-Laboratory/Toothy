@@ -18,7 +18,14 @@ import pdb
 ########         GENERAL FUNCTIONS        ########
 ##################################################
 
-
+def IsNum(x):
+    """ Return True if $x is numeric, False otherwise """
+    try:
+        _ = float(x)
+        return True
+    except:
+        return False
+    
 def Downsample(arr, n):
     """ Downsample 2D input $arr by factor of $n """
     end =  n * int(len(arr)/n)
