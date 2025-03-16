@@ -2412,8 +2412,9 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         self.SWR_ALL = pd.DataFrame(self.swr_list[self.iprb])
         
         # save specific event DFs for current probe
-        DS_DF  = pd.DataFrame(self.DS_ALL.loc[self.hil_chan])
-        SWR_DF = pd.DataFrame(self.SWR_ALL.loc[self.ripple_chan])
+        theta_chan, ripple_chan, hil_chan = self.event_channel_list[self.iprb]
+        DS_DF  = pd.DataFrame(self.DS_ALL.loc[hil_chan])
+        SWR_DF = pd.DataFrame(self.SWR_ALL.loc[ripple_chan])
         
         SWR_DF.to_csv(Path(self.ddir, f'SWR_DF_{self.iprb}'), index_label=False)
         DS_DF.to_csv(Path(self.ddir, f'DS_DF_{self.iprb}'), index_label=False)
