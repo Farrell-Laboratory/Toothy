@@ -21,6 +21,7 @@ from probeinterface.plotting import plot_probe
 import pdb
 # custom modules
 import pyfx
+import qparam
 import ephys
 
 # widget_list = ('QPushButton, QRadioButton, QLabel, QComboBox, QSpinBox, '
@@ -982,6 +983,7 @@ class ParamObject(QtWidgets.QWidget):
         
         # labels
         self.lfp_fs_lbl = QtWidgets.QLabel('Downsampled FS')
+        self.trange_lbl = QtWidgets.QLabel('Recording cutoffs')
         self.theta_lbl = QtWidgets.QLabel('Theta range')
         self.slow_gamma_lbl = QtWidgets.QLabel('Slow gamma range')
         self.fast_gamma_lbl = QtWidgets.QLabel('Fast gamma range')
@@ -1001,6 +1003,7 @@ class ParamObject(QtWidgets.QWidget):
         self.swr_maxamp_win_lbl = QtWidgets.QLabel('Ripple peak window')
         # descriptions
         self.lfp_fs_info = 'Target sampling rate (Hz) for downsampled LFP data.'
+        self.trange_info = 'Start and end recording timepoints (s) to process for analysis.'
         self.theta_info = 'Bandpass filter cutoff frequencies (Hz) in the theta frequency range.'
         self.slow_gamma_info = 'Bandpass filter cutoff frequencies (Hz) in the slow gamma frequency range.'
         self.fast_gamma_info = 'Bandpass filter cutoff frequencies (Hz) in the fast gamma frequency range.'
@@ -1023,6 +1026,8 @@ class ParamObject(QtWidgets.QWidget):
         self.lfp_fs.setDecimals(1)
         self.lfp_fs.setSingleStep(0.5)
         self.lfp_fs.setSuffix(' Hz')
+        self.trange = SpinboxRange(double=True, decimals=0, maximum=999999, suffix=' s')
+        self.trange.box1.setMinimum(-1)
         kwargs = dict(double=True, decimals=1, step=0.5, maximum=999999, suffix=' Hz')
         self.theta = SpinboxRange(**kwargs)
         self.slow_gamma = SpinboxRange(**kwargs)
@@ -1056,6 +1061,7 @@ class ParamObject(QtWidgets.QWidget):
         self.swr_maxamp_win.setSuffix(' ms')
         # row widgets
         self.lfp_fs_row = self.create_row(self.lfp_fs_lbl, self.lfp_fs, self.lfp_fs_info)
+        self.trange_row = self.create_row(self.trange_lbl, self.trange, self.trange_info)
         self.theta_row = self.create_row(self.theta_lbl, self.theta, self.theta_info)
         self.slow_gamma_row = self.create_row(self.slow_gamma_lbl, self.slow_gamma, self.slow_gamma_info)
         self.fast_gamma_row = self.create_row(self.fast_gamma_lbl, self.fast_gamma, self.fast_gamma_info)
@@ -1201,6 +1207,7 @@ class ParamObject(QtWidgets.QWidget):
             sbox.setMaximum(999999)
             
         self.LABELS = [self.lfp_fs_lbl,
+                       self.trange_lbl,
                        self.theta_lbl,
                        self.slow_gamma_lbl,
                        self.fast_gamma_lbl,
@@ -1237,6 +1244,7 @@ class ParamObject(QtWidgets.QWidget):
                        self.el_h_lbl,
                        self.el_shape_lbl]
         self.WIDGETS = [self.lfp_fs,
+                        self.trange,
                         self.theta,
                         self.slow_gamma,
                         self.fast_gamma,
@@ -1285,6 +1293,7 @@ class ParamObject(QtWidgets.QWidget):
         self.layout = QtWidgets.QVBoxLayout(self)
         if self.data_processing == True:
             self.layout.addWidget(self.lfp_fs_row)
+            self.layout.addWidget(self.trange_row)
             self.layout.addWidget(self.theta_row)
             self.layout.addWidget(self.slow_gamma_row)
             self.layout.addWidget(self.fast_gamma_row)
@@ -1325,6 +1334,7 @@ class ParamObject(QtWidgets.QWidget):
     
     def connect_signals(self):
         self.lfp_fs.valueChanged.connect(self.emit_signal)
+        self.trange.range_changed_signal.connect(self.emit_signal)
         self.theta.range_changed_signal.connect(self.emit_signal)
         self.slow_gamma.range_changed_signal.connect(self.emit_signal)
         self.fast_gamma.range_changed_signal.connect(self.emit_signal)
@@ -1384,6 +1394,7 @@ class ParamObject(QtWidgets.QWidget):
     def ddict_from_gui(self):
         """ Return GUI widget values as parameter dictionary """
         ddict = dict(lfp_fs           = self.lfp_fs.value(),
+                     trange           = self.trange.get_values(),
                      theta            = self.theta.get_values(),
                      slow_gamma       = self.slow_gamma.get_values(),
                      fast_gamma       = self.fast_gamma.get_values(),
@@ -1428,6 +1439,8 @@ class ParamObject(QtWidgets.QWidget):
         param_dict.update(ddict)
         # data processing
         self.lfp_fs.setValue(param_dict['lfp_fs'])
+        self.trange.box0.setValue(param_dict['trange'][0])
+        self.trange.box1.setValue(param_dict['trange'][1])
         self.theta.box0.setValue(param_dict['theta'][0])
         self.theta.box1.setValue(param_dict['theta'][1])
         self.slow_gamma.box0.setValue(param_dict['slow_gamma'][0])
@@ -1501,7 +1514,7 @@ class MsgboxParams(Msgbox):
             self.accept()
     
     def create_param_file(self):
-        self.param_dlg = ParamSettings(ddict=ephys.get_original_defaults(), parent=self)
+        self.param_dlg = ParamSettings(ddict=qparam.get_original_defaults(), parent=self)
         self.param_dlg.show()
         self.param_dlg.raise_()
         res = self.param_dlg.exec()
@@ -1600,7 +1613,7 @@ class FileDialog(QtWidgets.QFileDialog):
     
     def __init__(self, init_ddir='', load_or_save='load', 
                  is_directory=True, is_probe=False, is_array=False, is_param=False, 
-                 parent=None, **kwargs):
+                 allow_invalid_params=False, parent=None, **kwargs):
         """
         init_ddir: optional starting directory
         load_or_save: "load" in existing directory/file or "save" new one
@@ -1612,6 +1625,7 @@ class FileDialog(QtWidgets.QFileDialog):
         super().__init__(parent)
         self.load_or_save = load_or_save
         self.is_probe, self.is_array, self.is_param = is_probe, is_array, is_param
+        self.allow_invalid_params = allow_invalid_params
         self.probe_exts = kwargs.get('probe_exts', self.probe_exts)
         self.array_exts = kwargs.get('array_exts', self.array_exts)
         
@@ -1683,9 +1697,12 @@ class FileDialog(QtWidgets.QFileDialog):
         if self.load_or_save=='load' and self.is_directory==False:
             is_valid, filepath, filetype = self.file_validation()
             if not is_valid:
-                _ = MsgboxInvalid.invalid_file(filepath=filepath, filetype=filetype)
-                self.LOADED_DATA = None
-                return
+                if filetype == 'param' and self.allow_invalid_params:  # return invalid param dict
+                    self.LOADED_DATA = ephys.read_param_file(filepath, return_none=False)[0]
+                else:  # display error messagebox, then return to the file window
+                    _ = MsgboxInvalid.invalid_file(filepath=filepath, filetype=filetype)
+                    self.LOADED_DATA = None
+                    return
         elif self.load_or_save == 'save':
             ddir = self.directory().path()
             if self.fileMode()==self.Directory and len(os.listdir(ddir))>0:
@@ -1700,10 +1717,10 @@ class FileDialog(QtWidgets.QFileDialog):
         """ Set keyword args based on file type/initial directory """
         kwargs = dict(init_ddir='', is_probe=False, is_array=False, is_param=False)
         if filetype == 'probe':
-            kwargs['init_ddir'] = ephys.base_dirs()[2]
+            kwargs['init_ddir'] = ephys.base_dirs()[1] # default probe folder
             kwargs['is_probe'] = True
         elif filetype == 'array':
-            kwargs['init_ddir'] = ephys.base_dirs()[0]
+            kwargs['init_ddir'] = ephys.base_dirs()[0] # default data folder
             kwargs['is_array'] = True
         elif filetype == 'param':
             kwargs['init_ddir'] = str(os.getcwd())
@@ -1713,9 +1730,10 @@ class FileDialog(QtWidgets.QFileDialog):
         return kwargs
         
     @classmethod
-    def load_file(cls, filetype, init_ddir=None, parent=None):
+    def load_file(cls, filetype, init_ddir=None, allow_invalid_params=False, parent=None):
         assert filetype in ['probe','array','param']
         kwargs = cls.get_file_kwargs(filetype, init_ddir=init_ddir)
+        kwargs['allow_invalid_params'] = bool(allow_invalid_params)
         # initialize file dialog
         dlg = cls(parent=parent, **kwargs)
         res = dlg.exec()
@@ -1726,7 +1744,7 @@ class FileDialog(QtWidgets.QFileDialog):
         
 
     @classmethod
-    def save_file(cls, data_object, filetype, init_ddir=None, parent=None):
+    def save_file(cls, data_object, filetype, init_ddir=None, init_fname='', parent=None):
         assert filetype in ['probe','param']
         kwargs = cls.get_file_kwargs(filetype, init_ddir=init_ddir)
         
@@ -1734,13 +1752,18 @@ class FileDialog(QtWidgets.QFileDialog):
         pyfx.qapp()
         dlg = cls(load_or_save='save', parent=parent, **kwargs)
         if filetype == 'probe':   # filter for .json, .prb, and .mat extensions
-            init_fname = f'{data_object.name}_config.json'
+            if init_fname == '':
+                init_fname = f'{data_object.name}_config.json'
             dlg.fx = lambda txt: any(map(lambda ext: txt.endswith(ext), dlg.probe_exts))
         elif filetype == 'param': # filter for .txt extension
-            init_fname = 'default_params.txt'
             dlg.fx = lambda txt: bool(txt.endswith('.txt'))
+        # only allow save if file name has the correct extension
         dlg.lineEdit.textChanged.connect(lambda txt: dlg.btn.setEnabled(dlg.fx(txt)))
+        # initialize file name and save button status
+        dlg.lineEdit.blockSignals(True)
         dlg.lineEdit.setText(init_fname)
+        dlg.lineEdit.blockSignals(False)
+        dlg.btn.setEnabled(dlg.fx(init_fname))
         dlg.show()
         dlg.raise_()
         res = dlg.exec()
