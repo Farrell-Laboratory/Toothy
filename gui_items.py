@@ -8,6 +8,7 @@ Created on Wed Aug  7 13:45:34 2024
 import sys
 import os
 from pathlib import Path
+import re
 import shutil
 import matplotlib
 import numpy as np
@@ -684,6 +685,33 @@ class TableWidget(QtWidgets.QTableWidget):
     def load_df(self, df, selected_columns = []):
         self.df = df
         self.init_table(selected_columns)
+    
+    def keyPressEvent(self, event):
+        super().keyPressEvent(event)
+        if event.key() == QtCore.Qt.Key.Key_C and (event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier):
+            copied_cells = sorted(self.selectedIndexes())
+
+            copy_text = ''
+            max_column = copied_cells[-1].column()
+            for c in copied_cells:
+                copy_text += self.item(c.row(), c.column()).text()
+                if c.column() == max_column:
+                    copy_text += '\n'
+                else:
+                    copy_text += '\t'
+            QtWidgets.QApplication.clipboard().setText(copy_text)
+        
+        elif event.key() == QtCore.Qt.Key.Key_V and (event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier):
+            copied_text = QtWidgets.QApplication.clipboard().text()
+            digits_only = re.split(r'\D+', copied_text)
+            vals = [d for d in digits_only if d != '']
+            if len(vals) == 0: return
+            top_row = sorted(self.selectedIndexes())[0].row()
+            bottom_row = min([top_row+len(vals), self.rowCount()])
+            icol = self.selectedIndexes()[0].column()
+            for i,irow in enumerate(range(top_row, bottom_row)):
+                self.setItem(irow, icol, QtWidgets.QTableWidgetItem(vals[i]))
+            print('pasted')
 
 
 class TTabWidget(QtWidgets.QTabWidget):
