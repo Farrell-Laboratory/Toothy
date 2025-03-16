@@ -17,6 +17,7 @@ import probeinterface as prif
 import pdb
 # custom modules
 import pyfx
+import qparam
 import ephys
 import gui_items as gi
 import data_processing as dp
@@ -177,7 +178,6 @@ class DirectorySelectionWidget(QtWidgets.QWidget):
         self.ddir_icon_btn.new_status(x)  # status icon
         
 
-
 class ProcessedDirectorySelectionPopup(QtWidgets.QDialog):
     def __init__(self, init_ddir='', go_to_last=False, parent=None):
         super().__init__(parent)
@@ -190,7 +190,7 @@ class ProcessedDirectorySelectionPopup(QtWidgets.QDialog):
             self.ddir = qfd.directory().path()
         else:
             if init_ddir == '':
-                self.ddir = ephys.base_dirs()[1]
+                self.ddir = ephys.base_dirs()[0]
             else:
                 self.ddir = init_ddir
         
@@ -237,7 +237,6 @@ class ProcessedDirectorySelectionPopup(QtWidgets.QDialog):
         self.ddw.ddir_btn.clicked.connect(self.select_ddir)
         self.probe_dropdown.currentTextChanged.connect(self.update_probe)
         self.info_view_btn.clicked.connect(self.show_info_popup)
-    
     
     def show_info_popup(self):
         fig = IFigProbe(self.probe)
@@ -313,20 +312,12 @@ class BaseFolderPopup(QtWidgets.QDialog):
                              'padding:5px;}')
         fmt = '<code>{}</code>'
         
-        self.btn_list = []
-        self.btn2_list = []
-        for i in range(5):
+        def makebtn(icon):
             btn = QtWidgets.QPushButton()
-            btn.setIcon(QtWidgets.QWidget().style().standardIcon(QtWidgets.QStyle.SP_DialogOpenButton))
             btn.setMinimumSize(30,30)
+            btn.setIcon(icon)
             btn.setIconSize(QtCore.QSize(20,20))
-            self.btn_list.append(btn)
-            if i<2:
-                btn2 = QtWidgets.QPushButton()
-                btn2.setIcon(QtWidgets.QWidget().style().standardIcon(QtWidgets.QStyle.SP_DialogCloseButton))
-                btn2.setMinimumSize(30,30)
-                btn2.setIconSize(QtCore.QSize(20,20))
-                self.btn2_list.append(btn2)
+            return btn
         
         ###   RAW BASE FOLDER
         self.raw_w = QtWidgets.QWidget()
@@ -337,24 +328,10 @@ class BaseFolderPopup(QtWidgets.QDialog):
         raw_row0.addStretch()
         self.raw_qlabel = QtWidgets.QLabel(fmt.format(self.BASE_FOLDERS[0]))
         self.raw_qlabel.setStyleSheet(qlabel_ss)
-        self.raw_btn = self.btn_list[0]
+        self.raw_btn = makebtn(icon=QtGui.QIcon(':/icons/folder.png'))
         raw_row1.addWidget(self.raw_qlabel, stretch=2)
         raw_row1.addWidget(self.raw_btn, stretch=0)
         layout.addWidget(self.raw_w)
-        
-        ###   PROCESSED BASE FOLDER
-        self.processed_w = QtWidgets.QWidget()
-        processed_vlay, processed_row0, processed_row1 = self.create_hbox_rows()
-        self.processed_w.setLayout(processed_vlay)
-        processed_header = QtWidgets.QLabel('<b>PROCESSED DATA</b>')
-        processed_row0.addWidget(processed_header)
-        processed_row0.addStretch()
-        self.processed_qlabel = QtWidgets.QLabel(fmt.format(self.BASE_FOLDERS[1]))
-        self.processed_qlabel.setStyleSheet(qlabel_ss)
-        self.processed_btn = self.btn_list[1]
-        processed_row1.addWidget(self.processed_qlabel, stretch=2)
-        processed_row1.addWidget(self.processed_btn, stretch=0)
-        layout.addWidget(self.processed_w)
         
         ###   PROBE BASE FOLDER
         self.probe_w = QtWidgets.QWidget()
@@ -363,9 +340,9 @@ class BaseFolderPopup(QtWidgets.QDialog):
         probe_header = QtWidgets.QLabel('<b>PROBE FILES</b>')
         probe_row0.addWidget(probe_header)
         probe_row0.addStretch()
-        self.probe_qlabel = QtWidgets.QLabel(fmt.format(self.BASE_FOLDERS[2]))
+        self.probe_qlabel = QtWidgets.QLabel(fmt.format(self.BASE_FOLDERS[1]))
         self.probe_qlabel.setStyleSheet(qlabel_ss)
-        self.probe_btn = self.btn_list[2]
+        self.probe_btn = makebtn(icon=QtGui.QIcon(':/icons/folder.png'))
         probe_row1.addWidget(self.probe_qlabel, stretch=2)
         probe_row1.addWidget(self.probe_btn, stretch=0)
         layout.addWidget(self.probe_w)
@@ -377,10 +354,10 @@ class BaseFolderPopup(QtWidgets.QDialog):
         probefile_header = QtWidgets.QLabel('<b>DEFAULT PROBE</b>')
         probefile_row0.addWidget(probefile_header)
         probefile_row0.addStretch()
-        self.probefile_qlabel = QtWidgets.QLabel(fmt.format(self.BASE_FOLDERS[3]))
+        self.probefile_qlabel = QtWidgets.QLabel(fmt.format(self.BASE_FOLDERS[2]))
         self.probefile_qlabel.setStyleSheet(qlabel_ss)
-        self.probefile_btn = self.btn_list[3]
-        self.probefile_clear = self.btn2_list[0]
+        self.probefile_btn = makebtn(icon=QtGui.QIcon(':/icons/load.png'))
+        self.probefile_clear = makebtn(icon=QtGui.QIcon(':/icons/trash.png'))
         probefile_row1.addWidget(self.probefile_qlabel, stretch=2)
         probefile_row1.addWidget(self.probefile_btn, stretch=0)
         probefile_row1.addWidget(self.probefile_clear, stretch=0)
@@ -393,22 +370,22 @@ class BaseFolderPopup(QtWidgets.QDialog):
         paramfile_header = QtWidgets.QLabel('<b>DEFAULT PARAMETERS</b>')
         paramfile_row0.addWidget(paramfile_header)
         paramfile_row0.addStretch()
-        self.paramfile_qlabel = QtWidgets.QLabel(fmt.format(self.BASE_FOLDERS[4]))
+        self.paramfile_qlabel = QtWidgets.QLabel(fmt.format(self.BASE_FOLDERS[3]))
         self.paramfile_qlabel.setStyleSheet(qlabel_ss)
-        self.paramfile_btn = self.btn_list[4]
-        self.paramfile_clear = self.btn2_list[1]
+        self.paramfile_btn = makebtn(icon=QtGui.QIcon(':/icons/load.png'))
+        self.paramfile_auto = makebtn(icon=QtGui.QIcon(':/icons/load_txt.png'))
+        self.paramfile_auto.setToolTip('Auto-generate file from default params')
         paramfile_row1.addWidget(self.paramfile_qlabel, stretch=2)
         paramfile_row1.addWidget(self.paramfile_btn, stretch=0)
-        paramfile_row1.addWidget(self.paramfile_clear, stretch=0)
+        paramfile_row1.addWidget(self.paramfile_auto, stretch=0)
         layout.addWidget(self.paramfile_w)
         
         self.raw_btn.clicked.connect(lambda: self.choose_base_ddir(0))
-        self.processed_btn.clicked.connect(lambda: self.choose_base_ddir(1))
-        self.probe_btn.clicked.connect(lambda: self.choose_base_ddir(2))
+        self.probe_btn.clicked.connect(lambda: self.choose_base_ddir(1))
         self.probefile_btn.clicked.connect(self.choose_probe_file)
         self.paramfile_btn.clicked.connect(self.choose_param_file)
         self.probefile_clear.clicked.connect(self.clear_probe_file)
-        self.paramfile_clear.clicked.connect(self.clear_param_file)
+        self.paramfile_auto.clicked.connect(self.auto_param_file)
         
         bbox = QtWidgets.QHBoxLayout()
         self.save_btn = QtWidgets.QPushButton('Save')
@@ -434,33 +411,36 @@ class BaseFolderPopup(QtWidgets.QDialog):
     
     def choose_probe_file(self):
         probe, fpath = gi.FileDialog.load_file(filetype='probe', parent=self,
-                                               init_ddir=str(self.BASE_FOLDERS[2]))
+                                               init_ddir=str(self.BASE_FOLDERS[1]))
         if probe is not None:
-            self.BASE_FOLDERS[3] = str(fpath)
-            self.update_base_ddir(3)
+            self.BASE_FOLDERS[2] = str(fpath)
+            self.update_base_ddir(2)
             self.save_btn.setEnabled(True)
         
     def clear_probe_file(self):
-        self.BASE_FOLDERS[3] = ''
-        self.update_base_ddir(3)
+        self.BASE_FOLDERS[2] = ''
+        self.update_base_ddir(2)
         self.save_btn.setEnabled(True)
             
     def choose_param_file(self):
         param_dict, fpath = gi.FileDialog.load_file(filetype='param', parent=self)
         if param_dict is not None:
-            self.BASE_FOLDERS[4] = str(fpath)
-            self.update_base_ddir(4)
+            self.BASE_FOLDERS[3] = str(fpath)
+            self.update_base_ddir(3)
             self.save_btn.setEnabled(True)
     
-    def clear_param_file(self):
-        self.BASE_FOLDERS[4] = ''
-        self.update_base_ddir(4)
-        self.save_btn.setEnabled(True)
+    def auto_param_file(self):
+        fpath = gi.FileDialog.save_file(qparam.get_original_defaults(), filetype='param',
+                                        init_ddir=os.getcwd(), init_fname='default_params.txt')
+        if fpath:
+            self.BASE_FOLDERS[3] = str(fpath)
+            self.update_base_ddir(3)
+            self.save_btn.setEnabled(True)
         
     def choose_base_ddir(self, i):
         init_ddir = str(self.BASE_FOLDERS[i])
         fmt = 'Base folder for %s'
-        titles = [fmt % x for x in ['raw data', 'processed data', 'probe files']]
+        titles = [fmt % x for x in ['raw data', 'probe files']]
         # when activated, initialize at ddir and save new base folder at index i
         dlg = gi.FileDialog(init_ddir=init_ddir, parent=self)
         dlg.setWindowTitle(titles[i])
@@ -475,13 +455,11 @@ class BaseFolderPopup(QtWidgets.QDialog):
         if i==0:
             self.raw_qlabel.setText(fmt.format(self.BASE_FOLDERS[0]))
         elif i==1:
-            self.processed_qlabel.setText(fmt.format(self.BASE_FOLDERS[1]))
+            self.probe_qlabel.setText(fmt.format(self.BASE_FOLDERS[1]))
         elif i==2:
-            self.probe_qlabel.setText(fmt.format(self.BASE_FOLDERS[2]))
+            self.probefile_qlabel.setText(fmt.format(self.BASE_FOLDERS[2]))
         elif i==3:
-            self.probefile_qlabel.setText(fmt.format(self.BASE_FOLDERS[3]))
-        elif i==4:
-            self.paramfile_qlabel.setText(fmt.format(self.BASE_FOLDERS[4]))
+            self.paramfile_qlabel.setText(fmt.format(self.BASE_FOLDERS[3]))
     
     def save_base_folders(self):
         ddir_list = list(self.BASE_FOLDERS)
@@ -646,8 +624,11 @@ class DataWorker(QtCore.QObject):
     units = 'uV'
     lfp_units = 'mV'
     
-    def set_filepaths(self, raw_ddir, save_ddir):
+    def set_filepaths(self, raw_ddir, save_ddir=None):
         """ Paths to raw data source file and processed data target folder """
+        assert os.path.isdir(raw_ddir)
+        if save_ddir is None:
+            save_ddir = str(Path(raw_ddir, gi.unique_fname(raw_ddir, 'processed_data')))
         self.raw_ddir = raw_ddir
         self.save_ddir = save_ddir
     
@@ -731,6 +712,9 @@ class DataWorker(QtCore.QObject):
         ALL_DS['status'] = 1
         ALL_DS['is_valid'] = 1
         
+        if not os.path.isdir(self.save_ddir):
+            os.mkdir(self.save_ddir)
+        
         fx = lambda fname: gi.unique_fname(self.save_ddir, fname)
         np.save(Path(self.save_ddir, fx('lfp_time.npy')), self.lfp_time)
         np.save(Path(self.save_ddir, fx('lfp_fs.npy')), self.lfp_fs)
@@ -764,33 +748,26 @@ class DataWorker(QtCore.QObject):
 class RawDirectorySelectionPopup(QtWidgets.QDialog):
     RAW_DDIR_VALID = False
     RAW_ARRAY = None
-    PROCESSED_DDIR_VALID = False
     
-    def __init__(self, mode=2, raw_ddir='', processed_ddir='', PARAMS=None, parent=None):
+    def __init__(self, mode=2, raw_ddir='', parent=None):
         # 0==base, 1=last visited, 2=last visited IF it's within base
         super().__init__(parent)
-        self.PARAMS = PARAMS
-        if self.PARAMS is None:
-            self.PARAMS = ephys.get_original_defaults()
         self.setWindowTitle('Select a raw data source')
-        raw_base, processed_base, probe_base, probe_file, param_file  = ephys.base_dirs()
-        # get most recently entered directory
-        qfd = QtWidgets.QFileDialog()
-        last_ddir = str(qfd.directory().path())
         
-        #findme
+        # load parameters
+        self.PARAMS = ephys.read_params()
+        
+        # get initial directory for file dialog
+        raw_base, probe_base, probe_file, _  = ephys.base_dirs()
+        qfd = QtWidgets.QFileDialog()
+        last_ddir = str(qfd.directory().path()) # most recently entered directory
         self.raw_ddir = clean(mode, raw_base, last_ddir, str(raw_ddir))
-        self.processed_ddir = clean(mode, processed_base, last_ddir, str(processed_ddir))
         self.default_probe_file = probe_file
         
         self.gen_layout()
         self.probe_gbox.hide()
         
         self.update_raw_ddir()
-        if len(os.listdir(self.processed_ddir)) == 0:
-            self.update_processed_ddir()
-        else:
-            self.ddw2.update_status(self.processed_ddir, False)
         
         # create worker thread, connect functions
         self.worker_object = DataWorker()
@@ -840,16 +817,6 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         frame_hlay.addWidget(self.manual_upload_btn)
         ddir_vbox.addWidget(custom_bar)
         
-        ###   CREATE PROCESSED DATA FOLDER
-        
-        self.ddir_gbox2 = QtWidgets.QGroupBox()
-        self.ddir_gbox2.setStyleSheet('QGroupBox {border-width : 0px; font-weight : bold; text-decoration : underline;}')
-        ddir_vbox2 = pyfx.InterWidgets(self.ddir_gbox2, 'v')[2]
-        # create/overwrite processed data directory
-        self.ddw2 = DirectorySelectionWidget(title='<b><u>Save data</u></b>', simple=True)
-        self.qedit_hbox2 = self.ddw2.qedit_hbox
-        ddir_vbox2.addWidget(self.ddw2)
-        
         self.settings_w = QtWidgets.QWidget()
         settings_vlay = QtWidgets.QHBoxLayout(self.settings_w)
         #settings_vlay.setContentsMargins(0,0,0,0)
@@ -885,7 +852,6 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         bbox.addWidget(self.tort_btn)
         
         self.layout.addWidget(self.ddir_gbox)
-        self.layout.addWidget(self.ddir_gbox2)
         self.layout.addWidget(self.probe_gbox) #addprobe
         line0 = pyfx.DividerLine()
         self.layout.addWidget(line0)
@@ -894,7 +860,6 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         # connect buttons
         self.ddw.ddir_btn.clicked.connect(self.select_ddir)
         self.manual_upload_btn.clicked.connect(self.load_array)
-        self.ddw2.ddir_btn.clicked.connect(self.make_ddir)
         
         self.continue_btn.clicked.connect(self.load_data)
         self.cancel_btn.clicked.connect(self.reject)
@@ -935,24 +900,24 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
             self.accept()
         
     
-    def view_param_popup(self):
-        """ View default parameters """
-        params = ephys.read_param_file()
-        keys, vals = zip(*params.items())
-        vstr = [*map(str,vals)]
-        klens = [*map(len, keys)]; kmax=max(klens)
-        padk = [*map(lambda k: k + '_'*(kmax-len(k))+':', keys)]
-        html = ['<pre>'+k+v+'</pre>' for k,v in zip(padk,vstr)]
-        text = '<h3><tt>DEFAULT PARAMETERS</tt></h3>' + '<hr>' + ''.join(html)
-        textwidget = QtWidgets.QTextEdit(text)
-        # create popup window for text widget
-        dlg = QtWidgets.QDialog(self)
-        lay = QtWidgets.QVBoxLayout(dlg)
-        lay.addWidget(textwidget)
-        qrect = pyfx.ScreenRect(perc_height=0.5, perc_width=0.3, keep_aspect=False)
-        dlg.setGeometry(qrect)
-        dlg.show()
-        dlg.raise_()
+    # def view_param_popup(self):
+    #     """ View default parameters """
+    #     params = ephys.read_param_file()
+    #     keys, vals = zip(*params.items())
+    #     vstr = [*map(str,vals)]
+    #     klens = [*map(len, keys)]; kmax=max(klens)
+    #     padk = [*map(lambda k: k + '_'*(kmax-len(k))+':', keys)]
+    #     html = ['<pre>'+k+v+'</pre>' for k,v in zip(padk,vstr)]
+    #     text = '<h3><tt>DEFAULT PARAMETERS</tt></h3>' + '<hr>' + ''.join(html)
+    #     textwidget = QtWidgets.QTextEdit(text)
+    #     # create popup window for text widget
+    #     dlg = QtWidgets.QDialog(self)
+    #     lay = QtWidgets.QVBoxLayout(dlg)
+    #     lay.addWidget(textwidget)
+    #     qrect = pyfx.ScreenRect(perc_height=0.5, perc_width=0.3, keep_aspect=False)
+    #     dlg.setGeometry(qrect)
+    #     dlg.show()
+    #     dlg.raise_()
             
             
     def center_window(self):
@@ -977,7 +942,7 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
             self.update_raw_ddir()
     
     def load_data(self):
-        self.worker_object.set_filepaths(self.raw_ddir, self.processed_ddir)
+        self.worker_object.set_filepaths(self.raw_ddir)
         # load raw data from recording software or annotated .npy file
         if self.RAW_ARRAY is not None:
             self.worker_object.DATA = self.RAW_ARRAY
@@ -1003,7 +968,6 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
             
         # disable data loading
         self.ddir_gbox.setEnabled(False)
-        self.ddir_gbox2.setEnabled(False)
         for btn in [self.oe_radio, self.nn_radio, self.nl_radio, self.manual_radio]:
             btn.setStyleSheet('QRadioButton:disabled {color : gray;}')
         self.center_window()
@@ -1031,9 +995,9 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
     def update_raw_ddir(self):
         # check if raw data files are present
         files = os.listdir(self.raw_ddir)
-        xdat_files = [f for f in files if f.endswith('.xdat.json')]
+        xdat_files = [f for f in files if f.endswith('.xdat.json') or f.endswith('_data.xdat')]
         a = bool('structure.oebin' in files)
-        b = bool(len(xdat_files) > 0)
+        b = bool(len(xdat_files) >= 2)
         c = bool(len([f for f in files if f.endswith('.ncs')]) > 0)
         d = bool(self.manual_upload_flabel.text() in files and self.RAW_ARRAY is not None)
         x = bool(a or b or c or d)
@@ -1047,27 +1011,8 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         
         self.RAW_DDIR_VALID = bool(x)
         self.adjustSize()
-        self.continue_btn.setEnabled(bool(self.RAW_DDIR_VALID and self.PROCESSED_DDIR_VALID)) #delprobe and self.PROBE_CONFIG_VALID))
-    
-    
-    def make_ddir(self):
-        # open file popup to create processed data folder
-        dlg = gi.FileDialog(init_ddir=self.processed_ddir, load_or_save='save', parent=self)
-        res = dlg.exec()
-        if res:
-            self.processed_ddir = str(dlg.directory().path())
-            self.update_processed_ddir()
-    
-    
-    def update_processed_ddir(self):
-        # update widgets
-        self.ddw2.update_status(self.processed_ddir, True)
+        self.continue_btn.setEnabled(bool(self.RAW_DDIR_VALID)) #delprobe and self.PROBE_CONFIG_VALID))
         
-        self.PROCESSED_DDIR_VALID = True
-        #self.probe_gbox.setVisible(bool(self.RAW_DDIR_VALID)) #delprobe
-        self.adjustSize()
-        self.continue_btn.setEnabled(bool(self.RAW_DDIR_VALID and self.PROCESSED_DDIR_VALID)) #delprobe and self.PROBE_CONFIG_VALID))
-    
     
     def PROCESS_THE_DATA(self):
         
@@ -1090,7 +1035,6 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         
     def accept(self):
         print(f'Raw data folder: {self.raw_ddir}')
-        print(f'Save folder: {self.processed_ddir}')
         super().accept()
         
         
@@ -1432,4 +1376,10 @@ class tort(QtWidgets.QWidget):
         self.tort_btn.setEnabled(is_valid)  # require valid config for next step
         self.data_lbl.setText(self.data_txt_fmt % (['red','green'][int(is_valid)], nvalid))
         self.check_signal.emit()
-        
+
+if __name__ == '__main__':
+    app = pyfx.qapp()
+    w = BaseFolderPopup()
+    w.show()
+    w.raise_()
+    w.exec()
