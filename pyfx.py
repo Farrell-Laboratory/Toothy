@@ -309,7 +309,6 @@ def qapp():
     """ Check for an existing QApplication instance """
     app = QtWidgets.QApplication.instance()
     if not app: 
-        print('qapp creating a new QApplication instance')
         app = QtWidgets.QApplication(sys.argv)
         app.setStyle('Fusion')
         app.setQuitOnLastWindowClosed(True)
