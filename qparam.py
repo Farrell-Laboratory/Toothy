@@ -238,4 +238,437 @@ def fix_params(ddict, default_dict=None):
         else:
             new_dict[k] = default_dict[k]
     return new_dict
+
+
+
+###########################################################
+########             PARAMETER WIDGETS             ########
+###########################################################
+
+
+class Spinbox(QtWidgets.QDoubleSpinBox):
+    param_changed_signal = QtCore.pyqtSignal()
+    
+    def __init__(self, key, isvalid=True, parent=None):
+        super().__init__(parent)
+        self.key = key
+        self.setObjectName(key)
+        self.isvalid = isvalid
+        self.wheelEvent = lambda event: None
+        self.ss = 'QAbstractSpinBox {background-color : %s; color : %s;}'
+        self.valueChanged.connect(self.param_changed_signal.emit)
+    
+    def set_widget_valid(self, x):
+        self.isvalid = bool(x)
+        ss = self.ss % [('red','transparent'),('white','black')][int(x)]
+        self.setStyleSheet(ss)
+    
+    def get_param_value(self):
+        return self.value()
+        
+    def update_param(self, val):
+        self.blockSignals(True)
+        self.setValue(val)
+        self.blockSignals(False)
+
+
+class Combobox(QtWidgets.QComboBox):
+    param_changed_signal = QtCore.pyqtSignal()
+    
+    def __init__(self, key, isvalid=True, parent=None):
+        super().__init__(parent)
+        self.key = key
+        self.setObjectName(key)
+        self.isvalid = isvalid
+        self.wheelEvent = lambda event: None
+        
+        if key in ['csd_method', 'f_type', 'el_shape']:
+            self.get_valtxt = lambda val: val.capitalize()
+            self.export_valtxt = lambda txt: txt.lower()
+        elif key == 'vaknin_el':
+            self.get_valtxt = lambda val: str(bool(val))
+            self.export_valtxt = lambda txt: bool(txt)
+        elif key == 'clus_algo':
+            self.get_valtxt = lambda val: dict(kmeans='K-means', dbscan='DBSCAN')[val]
+            self.export_valtxt = lambda txt: txt.replace('-','').lower()
+        
+        self.ss = ('QComboBox {color : black;}'
+                   'QComboBox:open {background-color : %s; color : %s;}')
+        self.currentIndexChanged.connect(self.param_changed_signal.emit)
+        self.activated.connect(lambda i: self.set_widget_valid(True))
+    
+    def set_widget_valid(self, x):
+        self.isvalid = bool(x)
+        ss = self.ss % [('red','transparent'),('white','black')][int(x)]
+        self.setStyleSheet(ss)
+        
+    def get_param_value(self):
+        res = self.export_valtxt(self.currentText())
+        return res
+    
+    def update_param(self, val):
+        txt = self.get_valtxt(val)
+        self.blockSignals(True)
+        self.setCurrentText(txt)
+        self.blockSignals(False)
+
+class SpinboxRange(QtWidgets.QWidget):
+    param_changed_signal = QtCore.pyqtSignal()
+    
+    def __init__(self, key, isvalid=True, double=False, alignment=QtCore.Qt.AlignLeft, parent=None, **kwargs):
+        super().__init__(parent)
+        self.key = key
+        self.setObjectName(key)
+        self.isvalid = isvalid
+        if double:
+            self.box0 = QtWidgets.QDoubleSpinBox()
+            self.box1 = QtWidgets.QDoubleSpinBox()
+        else:
+            self.box0 = QtWidgets.QSpinBox()
+            self.box1 = QtWidgets.QSpinBox()
+        self.boxes = [self.box0, self.box1]
+        for box in self.boxes:
+            box.wheelEvent = lambda event: None
+            box.setAlignment(alignment)
+            if 'suffix' in kwargs: box.setSuffix(kwargs['suffix'])
+            if 'minimum' in kwargs: box.setMinimum(kwargs['minimum'])
+            if 'maximum' in kwargs: box.setMaximum(kwargs['maximum'])
+            if 'decimals' in kwargs: box.setDecimals(kwargs['decimals'])
+            if 'step' in kwargs: box.setSingleStep(kwargs['step'])
+            box.valueChanged.connect(lambda: self.param_changed_signal.emit())
+            
+        self.dash = QtWidgets.QLabel(' — ')
+        self.dash.setAlignment(QtCore.Qt.AlignCenter)
+        
+        self.layout = QtWidgets.QHBoxLayout(self)
+        self.layout.setContentsMargins(0,0,0,0)
+        self.layout.setSpacing(0)
+        self.layout.addWidget(self.box0, stretch=2)
+        self.layout.addWidget(self.dash, stretch=0)
+        self.layout.addWidget(self.box1, stretch=2)
+        self.ss = ('QAbstractSpinBox {background-color : %s; color : %s;}')
+    
+    def set_widget_valid(self, x):
+        self.isvalid = bool(x)
+        ss = self.ss % [('red','transparent'),('white','black')][int(x)]
+        self.setStyleSheet(ss)
+    
+    def get_param_value(self):
+        return [self.box0.value(), self.box1.value()]
+    
+    def update_param(self, val):
+        for i,val in enumerate(val):
+            self.boxes[i].blockSignals(True)
+            self.boxes[i].setValue(val)
+            self.boxes[i].blockSignals(False)
+
+
+class ParamObject(QtWidgets.QWidget):
+    update_signal = QtCore.pyqtSignal(dict, list)
+    
+    def __init__(self, params={}, mode='all', parent=None):
+        """
+        mode: set visible parameters for different analysis modes
+            'signal_processing': LFP downsampling and filtering params
+            'ds_detection': thresholds for detecting DS events
+            'swr_detection': thresholds for detecting SWR events
+            'data_processing': includes all the above params
+            'ds_classification': CSD calculation and PCA clustering params
+            'all': all parameters
+        """
+        super().__init__(parent)
+        # set "default values" based on input param dictionary
+        dflt = get_original_defaults()
+        _,valid_ddict = validate_params(params)
+        for k,x in valid_ddict.items():
+            if x: dflt[k] = params[k]
+        self.DEFAULTS = dict(dflt)
+        
+        self.gen_layout()
+        self.init_widgets()
+        self.set_mode(mode)
+        
+        self.update_gui_from_ddict(params)
+        self.connect_signals()
+        
+        # self.setStyleSheet('QWidget {'
+        #                    'font-size : 15pt;'
+        #                    '}'
+        #                    'QToolTip {'
+        #                    'background-color : lightyellow;'
+        #                    'border : 2px solid black;'
+        #                    'font-size : 15pt;'
+        #                    'padding : 4px;'
+        #                    '}')
+        
+    def gen_layout(self):
+        self.setContentsMargins(0,0,15,0)
+        
+        ####################
+        ####   WIDGETS   ###
+        ####################
+        
+        ### signal_processing
+        self.lfp_fs = Spinbox(key='lfp_fs')
+        self.lfp_fs.setDecimals(1)
+        self.lfp_fs.setSingleStep(0.5)
+        self.lfp_fs.setSuffix(' Hz')
+        self.trange = SpinboxRange(key='trange', double=True, decimals=0, maximum=999999, suffix=' s')
+        self.trange.box1.setMinimum(-1)
+        
+        #self.trange.box1.setSpecialValueText()
+        
+        
+        kwargs = dict(double=True, decimals=1, step=0.5, maximum=999999, suffix=' Hz')
+        self.theta = SpinboxRange(key='theta', **kwargs)
+        self.slow_gamma = SpinboxRange(key='slow_gamma', **kwargs)
+        self.fast_gamma = SpinboxRange(key='fast_gamma', **kwargs)
+        self.ds_freq = SpinboxRange(key='ds_freq', **kwargs)
+        self.swr_freq = SpinboxRange(key='swr_freq', **kwargs)
+        ### ds_detection
+        self.ds_height_thr = Spinbox(key='ds_height_thr')
+        self.ds_height_thr.setSuffix(' S.D.')
+        self.ds_dist_thr = Spinbox(key='ds_dist_thr')
+        self.ds_dist_thr.setSuffix(' ms')
+        self.ds_dist_thr.setDecimals(0)
+        self.ds_prom_thr = Spinbox(key='ds_prom_thr')
+        self.ds_prom_thr.setSuffix(' a.u.')
+        self.ds_wlen = Spinbox(key='ds_wlen')
+        self.ds_wlen.setSuffix(' ms')
+        self.ds_wlen.setDecimals(0)
+        ### swr_detection
+        self.swr_ch_bound = Spinbox(key='swr_ch_bound')
+        self.swr_ch_bound.setSuffix(' channels')
+        self.swr_ch_bound.setDecimals(0)
+        self.swr_height_thr = Spinbox(key='swr_height_thr')
+        self.swr_height_thr.setSuffix(' S.D.')
+        self.swr_min_thr = Spinbox(key='swr_min_thr')
+        self.swr_min_thr.setSuffix(' S.D.')
+        self.swr_dist_thr = Spinbox(key='swr_dist_thr')
+        self.swr_dist_thr.setSuffix(' ms')
+        self.swr_dist_thr.setDecimals(0)
+        self.swr_min_dur = Spinbox(key='swr_min_dur')
+        self.swr_min_dur.setSuffix(' ms')
+        self.swr_min_dur.setDecimals(0)
+        self.swr_freq_thr = Spinbox(key='swr_freq_thr')
+        self.swr_freq_thr.setDecimals(1)
+        self.swr_freq_thr.setSuffix(' Hz')
+        self.swr_freq_win = Spinbox(key='swr_freq_win')
+        self.swr_freq_win.setSuffix(' ms')
+        self.swr_freq_win.setDecimals(0)
+        self.swr_maxamp_win = Spinbox(key='swr_maxamp_win')
+        self.swr_maxamp_win.setSuffix(' ms')
+        self.swr_maxamp_win.setDecimals(0)
+        ### csd_calculation
+        self.csd_method = Combobox(key='csd_method')
+        self.csd_method.addItems(['Standard','Delta','Step','Spline'])
+        self.f_type = Combobox(key='f_type')
+        self.f_type.addItems(['Gaussian','Identity','Boxcar','Hamming','Triangular'])
+        self.f_order = Spinbox(key='f_order')
+        self.f_order.setMinimum(1)
+        self.f_order.setDecimals(1)
+        self.f_sigma = Spinbox(key='f_sigma')
+        self.f_sigma.setDecimals(1)
+        self.f_sigma.setSingleStep(0.1)
+        self.vaknin_el = Combobox(key='vaknin_el')
+        self.vaknin_el.addItems(['True','False'])
+        self.tol = Spinbox(key='tol')
+        self.tol.setDecimals(7)
+        self.tol.setSingleStep(0.0000001)
+        self.spline_nsteps = Spinbox(key='spline_nsteps')
+        self.spline_nsteps.setMaximum(2500)
+        self.spline_nsteps.setDecimals(0)
+        self.src_diam = Spinbox(key='src_diam')
+        self.src_diam.setDecimals(3)
+        self.src_diam.setSingleStep(0.01)
+        self.src_diam.setSuffix(' mm')
+        self.src_h = Spinbox(key='src_h')
+        self.src_h.setDecimals(3)
+        self.src_h.setSingleStep(0.01)
+        self.src_h.setSuffix(' mm')
+        self.cond = Spinbox(key='cond')
+        self.cond.setDecimals(3)
+        self.cond.setSingleStep(0.01)
+        self.cond.setSuffix(' S/m')
+        self.cond_top = Spinbox(key='cond_top')
+        self.cond_top.setDecimals(3)
+        self.cond_top.setSingleStep(0.01)
+        self.cond_top.setSuffix(' S/m')
+        ### csd_clustering
+        self.clus_algo = Combobox(key='clus_algo')
+        self.clus_algo.addItems(['K-means','DBSCAN'])
+        self.nclusters = Spinbox(key='nclusters')
+        self.nclusters.setMinimum(1)
+        self.nclusters.setSuffix(' clusters')
+        self.nclusters.setDecimals(0)
+        self.eps = Spinbox(key='eps')
+        self.eps.setDecimals(2)
+        self.eps.setSingleStep(0.1)
+        self.eps.setSuffix(' a.u.')
+        self.min_clus_samples = Spinbox(key='min_clus_samples')
+        self.min_clus_samples.setMinimum(1)
+        self.min_clus_samples.setDecimals(0)
+        ### probe_geometry
+        self.el_w = Spinbox(key='el_w')
+        self.el_w.setDecimals(1)
+        self.el_w.setSuffix(' \u00B5m')
+        self.el_h = Spinbox(key='el_h')
+        self.el_h.setDecimals(1)
+        self.el_h.setSuffix(' \u00B5m')
+        self.el_shape = Combobox(key='el_shape')
+        self.el_shape.addItems(['Circle', 'Square', 'Rectangle'])
+        
+        for sbox in [self.lfp_fs, self.ds_height_thr, self.ds_dist_thr, self.ds_prom_thr, self.ds_wlen, 
+                     self.swr_ch_bound, self.swr_height_thr, self.swr_min_thr, self.swr_dist_thr, 
+                     self.swr_min_dur, self.swr_freq_thr, self.swr_freq_win, self.swr_maxamp_win,
+                     self.f_order, self.f_sigma, self.tol, self.src_diam, self.src_h, self.cond,
+                     self.cond_top, self.nclusters, self.eps, self.min_clus_samples, self.el_w, self.el_h]:
+            sbox.setMaximum(999999)
+            
+        tups = [(self.lfp_fs, 'signal_processing'),
+                (self.trange, 'signal_processing'),
+                (self.theta, 'signal_processing'),
+                (self.slow_gamma, 'signal_processing'),
+                (self.fast_gamma, 'signal_processing'),
+                (self.ds_freq, 'signal_processing'),
+                (self.swr_freq, 'signal_processing'),
+                
+                (self.ds_height_thr, 'ds_detection'),
+                (self.ds_dist_thr, 'ds_detection'),
+                (self.ds_prom_thr, 'ds_detection'),
+                (self.ds_wlen, 'ds_detection'),
+                
+                (self.swr_ch_bound, 'swr_detection'),
+                (self.swr_height_thr, 'swr_detection'),
+                (self.swr_min_thr, 'swr_detection'),
+                (self.swr_dist_thr, 'swr_detection'),
+                (self.swr_min_dur, 'swr_detection'),
+                (self.swr_freq_thr, 'swr_detection'),
+                (self.swr_freq_win, 'swr_detection'),
+                (self.swr_maxamp_win, 'swr_detection'),
+                
+                (self.csd_method, 'csd_calculation'),
+                (self.f_type, 'csd_calculation'),
+                (self.f_order, 'csd_calculation'),
+                (self.f_sigma, 'csd_calculation'),
+                (self.vaknin_el, 'csd_calculation'),
+                (self.tol, 'csd_calculation'),
+                (self.spline_nsteps, 'csd_calculation'),
+                (self.src_diam, 'csd_calculation'),
+                (self.src_h, 'csd_calculation'),
+                (self.cond, 'csd_calculation'),
+                (self.cond_top, 'csd_calculation'),
+                
+                (self.clus_algo, 'csd_clustering'),
+                (self.nclusters, 'csd_clustering'),
+                (self.eps, 'csd_clustering'),
+                (self.min_clus_samples, 'csd_clustering'),
+                
+                (self.el_w, 'probe_geometry'),
+                (self.el_h, 'probe_geometry'),
+                (self.el_shape, 'probe_geometry')]
+        
+        # get widget items and corresponding modes, labels, and info text
+        widgets,modes = map(list, zip(*tups))
+        info_dict = get_param_info()
+        
+        ###   ORGANIZE PARAMETERS BY MODE   ###
+        
+        # map analysis modes to parameter variable names
+        tmp = {m:[] for i,m in enumerate(modes) if modes.index(m)==i}
+        mode2key = {**tmp, 'data_processing':[], 'ds_classification':[], 'all':[]}
+        for key,m in zip(info_dict, modes):
+            mode2key['all'].append(key)
+            mode2key[m].append(key)
+            if m in ['signal_processing','ds_detection','swr_detection']:
+                mode2key['data_processing'].append(key)
+            if m in ['csd_calculation','csd_clustering','probe_geometry']:
+                mode2key['ds_classification'].append(key)
+        self.mode2key = mode2key
+            
+        ###   LAYOUT   ###
+        
+        self.vlay = QtWidgets.QVBoxLayout(self)
+        self.ROWS, self.WIDGETS = {},{}
+        for (key,(lbl,info)),widget in zip(info_dict.items(),widgets):
+            # make QLabel with hover info
+            qlabel = QtWidgets.QLabel(lbl)
+            qlabel.setToolTip(info)
+            # create row widget, add to layout
+            row = QtWidgets.QWidget()
+            hbox = QtWidgets.QHBoxLayout(row)
+            hbox.setContentsMargins(0,0,0,0)
+            hbox.addWidget(qlabel, stretch=0)
+            hbox.addWidget(widget, stretch=1)
+            self.ROWS[key] = row
+            self.WIDGETS[key] = widget
+            self.vlay.addWidget(row)
+    
+    def connect_signals(self):
+        for widget in self.WIDGETS.values():
+            widget.param_changed_signal.connect(self.emit_signal)
+            
+    def ddict_from_gui(self):
+        """ Return GUI widget values as parameter dictionary """
+        ddict = {}
+        invalid = []
+        for key in self.KEYS:
+            item = self.WIDGETS[key]
+            if item.isvalid == True:
+                ddict[key] = item.get_param_value()
+            else:  # # if item remains invalid, export original param value
+                if key in self.DDICT_ORIG: ddict[key] = self.DDICT_ORIG[key]
+                invalid.append(key)
+        return ddict, invalid
+    
+    def emit_signal(self, *args):
+        print(f'emit_signal; sender={self.sender().objectName()}')
+        
+        # A) user toggles widget -> that param is no longer invalid
+        # B) user uploads a new set of params -> validity depends on the content
+        # * try to prevent emit_signal during B
+        self.sender().set_widget_valid(True)
+        PARAMS, invalid = self.ddict_from_gui()
+        
+        
+        self.update_signal.emit(PARAMS, invalid)
+    
+    def set_mode(self, mode='all'):
+        if mode not in self.mode2key: mode = 'all'
+        self.KEYS = list(self.mode2key[mode])
+        
+        # show parameter rows for the given mode, hide the rest
+        for k,row in self.ROWS.items():
+            row.setVisible(k in self.KEYS)
+        QtCore.QTimer.singleShot(50, self.adjust_labels)
+        
+    def adjust_labels(self):
+        # set text label widths to the longest visible QLabel
+        qlabels = [self.ROWS[mk].findChild(QtWidgets.QLabel) for mk in self.KEYS]
+        mw = max([ql.width() for ql in qlabels])
+        for ql in qlabels:
+            ql.setAlignment(QtCore.Qt.AlignCenter)
+            ql.setFixedWidth(mw)
+    
+    def init_widgets(self):
+        func = lambda x: (lambda k,w: (w, self.DEFAULTS[k]))(*x)
+        for item,val in map(func, self.WIDGETS.items()):
+            item.update_param(val)
+            item.set_widget_valid(True)
+
+    def update_gui_from_ddict(self, ddict):#, block=False):
+        print('UPDATE_GUI_FROM_DDICT')
+        self.DDICT_ORIG = dict(ddict)
+        # check for valid $ddict values for each current param (e.g. lfp_fs:False, trange=True)
+        valid_ddict = {k:b for k,b in validate_params(ddict)[1].items() if k in self.KEYS}
+        param_dict = {k:ddict[k] if x else self.DEFAULTS[k] for k,x in valid_ddict.items()}
+        for key,val in param_dict.items():
+            item = self.WIDGETS[key]
+            #if block: item.blockSignals(True)
+            item.update_param(val)
+            item.set_widget_valid(valid_ddict[key])
+            #if block: item.blockSignals(False)
+    
+    def debug(self):
+        pdb.set_trace()
     
