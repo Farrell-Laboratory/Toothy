@@ -637,11 +637,23 @@ class DataWorker(QtCore.QObject):
         (self.DATA, self.AUX_DATA), self.FS, self.units = dp.load_raw_data(raw_ddir)
     
     def run(self):
+        # analyze recording between tstart and tend
+        nts = self.DATA.shape[1]  # original number of data points
+        dur = nts / self.FS
+        tstart, tend = self.PARAMS['trange']
+        tstart = min(tstart, dur-1)  # tstart must be at least 1s before last timepoint
+        if (tend != -1) and (tend <= tstart): # tend must be greater than tstart OR -1
+            tend = -1
+        self.PARAMS['trange'] = [tstart, tend]
+        if [tstart, tend] != [0,-1]:
+            istart = int(tstart*self.FS)
+            iend = nts if tend==-1 else min(int(tend*self.FS), nts)
+            self.DATA = self.DATA[:, istart:iend]
+        
         self.lfp_fs = self.PARAMS.pop('lfp_fs')
         self.dur = self.DATA.shape[1] / self.FS
         idx_by_probe = [prb.device_channel_indices for prb in self.PROBE_GROUP.probes]
         ds_factor = int(self.FS / self.lfp_fs)  # calculate downsampling factor
-        
         cf = pq.Quantity(1, self.units).rescale(self.lfp_units).magnitude  # uV -> mV conversion factor
         
         self.progress_signal.emit('Extracting LFPs by probe ...')
@@ -650,7 +662,7 @@ class DataWorker(QtCore.QObject):
         for idx in idx_by_probe:
             lfp = np.array([pyfx.Downsample(self.DATA[i], ds_factor)*cf for i in idx])
             self.lfp_list.append(lfp)
-        self.lfp_time = np.linspace(0, self.dur, int(self.lfp_list[0].shape[1]))
+        self.lfp_time = np.linspace(0, self.dur, lfp.shape[1])
         
         
         bp_dicts = {'raw':[], 'theta':[], 'slow_gamma':[], 'fast_gamma':[], 'swr':[], 'ds':[]}
@@ -766,7 +778,6 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         
         self.gen_layout()
         self.probe_gbox.hide()
-        
         self.update_raw_ddir()
         
         # create worker thread, connect functions
@@ -776,7 +787,7 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
     
     def gen_layout(self):
         self.layout = QtWidgets.QVBoxLayout(self)
-        self.layout.setSpacing(20)
+        self.layout.setSpacing(5)
         gbox_ss = 'QGroupBox {background-color : rgba(230,230,230,255);}'# border : 2px ridge gray; border-radius : 4px;}'
         #self.layout.setSizeConstraint(QtWidgets.QLayout.SetFixedSize)
         
@@ -817,18 +828,48 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         frame_hlay.addWidget(self.manual_upload_btn)
         ddir_vbox.addWidget(custom_bar)
         
+        ###   SETTINGS WIDGET
         self.settings_w = QtWidgets.QWidget()
-        settings_vlay = QtWidgets.QHBoxLayout(self.settings_w)
-        #settings_vlay.setContentsMargins(0,0,0,0)
-        self.base_folder_btn = QtWidgets.QToolButton()
-        self.base_folder_btn.setIcon(QtGui.QIcon(":/icons/user_folder.png"))
-        self.base_folder_btn.setIconSize(QtCore.QSize(30,30))
-        self.settings_btn = QtWidgets.QToolButton()
-        self.settings_btn.setIcon(QtGui.QIcon(":/icons/settings.png"))
-        self.settings_btn.setIconSize(QtCore.QSize(30,30))
-        
-        settings_vlay.addWidget(self.base_folder_btn)
-        settings_vlay.addWidget(self.settings_btn)
+        settings_vlay = QtWidgets.QVBoxLayout(self.settings_w)
+        settings_vlay.setContentsMargins(0,0,0,0)
+        # initialize main parameter input widget, embed in scroll area
+        self.params_widget = qparam.ParamObject(params=dict(self.PARAMS), mode='data_processing', parent=self)
+        self.qscroll = QtWidgets.QScrollArea()
+        self.qscroll.horizontalScrollBar().hide()
+        self.qscroll.setWidgetResizable(True)
+        self.qscroll.setWidget(self.params_widget)
+        qh = pyfx.ScreenRect(perc_height=0.25, keep_aspect=False).height()
+        self.qscroll.setMaximumHeight(qh)
+        self.qscroll.hide()
+        # create settings button to show/hide param widgets
+        bbar = QtWidgets.QHBoxLayout()
+        self.settings_btn0 = QtWidgets.QPushButton('Settings')
+        #self.settings_btn0.setIcon(QtGui.QIcon(":/icons/settings.png"))
+        #self.settings_btn0.setIconSize(QtCore.QSize(20,20))
+        #self.settings_btn0.setEnabled(False)
+        self.settings_btn0.setStyleSheet('QPushButton {'
+                                         'border : 1px solid rgba(0,0,0,50);'
+                                         'background-color : rgba(0,0,0,10);'
+                                         'color : black;'
+                                         'icon : url(:/icons/settings.png);'
+                                         'padding : 2px;'
+                                         '}')
+        self.settings_btn = QtWidgets.QPushButton()
+        self.settings_btn.setStyleSheet('QPushButton {'
+                                        'icon : url(:/icons/double_chevron_down.png);'
+                                        'padding : 2px;'
+                                        'outline : none;}'
+                                        'QPushButton:checked {'
+                                        'icon : url(:/icons/double_chevron_up.png);}')
+        self.settings_btn.setFocusPolicy(QtCore.Qt.NoFocus)
+        self.settings_btn.setFixedWidth(self.settings_btn.sizeHint().height())
+        self.settings_btn.setCheckable(True)
+        #self.settings_btn.setChecked(True)
+        self.settings_btn.toggled.connect(lambda x: self.qscroll.setVisible(x))
+        bbar.addWidget(self.settings_btn0)
+        bbar.addWidget(self.settings_btn)
+        settings_vlay.addLayout(bbar)
+        settings_vlay.addWidget(self.qscroll)
         
         ###   ASSIGN PROBE(S)
         self.probe_gbox = QtWidgets.QGroupBox()
@@ -852,10 +893,12 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         bbox.addWidget(self.tort_btn)
         
         self.layout.addWidget(self.ddir_gbox)
-        self.layout.addWidget(self.probe_gbox) #addprobe
+        self.layout.addWidget(self.settings_w)
+        self.layout.addWidget(self.probe_gbox)
         line0 = pyfx.DividerLine()
         self.layout.addWidget(line0)
         self.layout.addLayout(bbox)
+        self.layout.setSizeConstraint(QtWidgets.QLayout.SetFixedSize)
         
         # connect buttons
         self.ddw.ddir_btn.clicked.connect(self.select_ddir)
@@ -959,6 +1002,7 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         self.probe_gbox.setVisible(True)
         self.tort_btn.setVisible(True)
         self.continue_btn.setVisible(False)
+        self.settings_btn.setChecked(False)
         
         # try loading and adding default probe if it meets the criteria
         dflt_probe = ephys.read_probe_file(self.default_probe_file)
@@ -970,9 +1014,7 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         self.ddir_gbox.setEnabled(False)
         for btn in [self.oe_radio, self.nn_radio, self.nl_radio, self.manual_radio]:
             btn.setStyleSheet('QRadioButton:disabled {color : gray;}')
-        self.center_window()
-        
-        #QtCore.QTimer.singleShot(10, self.center_window)
+        QtCore.QTimer.singleShot(10, self.center_window)
     
     def update_probe_config(self):
         x = bool(self.tort.tort_btn.isEnabled())
@@ -982,7 +1024,6 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
     
     def select_ddir(self):
         # open file popup to select raw data folder
-        
         dlg = gi.FileDialog(init_ddir=self.raw_ddir, parent=self)
         res = dlg.exec()
         if res:
@@ -1030,12 +1071,15 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
             self.PROBE_GROUP.add_probe(item.probe)
         
         self.worker_object.PROBE_GROUP = self.PROBE_GROUP
-        self.worker_object.PARAMS = self.PARAMS
+        param_dict = self.params_widget.DEFAULTS        # validated input params
+        ddict = self.params_widget.ddict_from_gui()[0]  # current data processing params
+        param_dict.update(ddict)
+        self.worker_object.PARAMS = param_dict
         self.start_work()
         
-    def accept(self):
-        print(f'Raw data folder: {self.raw_ddir}')
-        super().accept()
+    # def accept(self):
+    #     print(f'Raw data folder: {self.raw_ddir}')
+    #     super().accept()
         
         
 class tort_row(QtWidgets.QWidget):
@@ -1347,7 +1391,6 @@ class tort(QtWidgets.QWidget):
         dlg.layout.addWidget(my_probegod.accept_btn)
         my_probegod.toggle_bgrp.buttonToggled.connect(lambda: QtCore.QTimer.singleShot(10, dlg.center_window))
         res = dlg.exec()
-        # probe = probegod.run_probe_window(accept_txt='CONTINUE', parent=self)
         if res:
             probe = my_probegod.probe
             self.add_probe_row(probe)
@@ -1376,10 +1419,3 @@ class tort(QtWidgets.QWidget):
         self.tort_btn.setEnabled(is_valid)  # require valid config for next step
         self.data_lbl.setText(self.data_txt_fmt % (['red','green'][int(is_valid)], nvalid))
         self.check_signal.emit()
-
-if __name__ == '__main__':
-    app = pyfx.qapp()
-    w = BaseFolderPopup()
-    w.show()
-    w.raise_()
-    w.exec()
