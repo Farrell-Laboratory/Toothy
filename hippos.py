@@ -9,6 +9,7 @@ import sys
 import os
 from pathlib import Path
 import numpy as np
+import pandas as pd
 from PyQt5 import QtWidgets
 import probeinterface as prif
 import pdb
@@ -17,6 +18,7 @@ app_ddir = Path(__file__).parent
 os.chdir(app_ddir)
 # import custom modules
 import pyfx
+import qparam
 import ephys
 import selection_popups as sp
 import gui_items as gi
@@ -27,58 +29,12 @@ from ds_classification_gui import DS_CSDWindow
 class hippos(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        
-        if not os.path.exists('default_folders.txt'):
-            default_probe_folder = str(Path(os.getcwd(), 'probe_configs'))
-            default_probe_file = str(Path(default_probe_folder, 'demo_probe_config.json'))
-            default_param_file = str(Path(os.getcwd(), 'default_params.txt'))
-            if not os.path.exists(default_probe_folder):
-                os.makedirs(default_probe_folder)  # initialize probe folder
-            if not os.path.exists(default_probe_file):
-                # create demo probe
-                shank = prif.generate_linear_probe(num_elec=8, ypitch=50)
-                pos_adj = shank.contact_positions[::-1] + np.array([0, 50])
-                shank.set_contacts(pos_adj, shapes='circle', 
-                                        shape_params=dict(radius=7.5))
-                shank.create_auto_shape('tip', margin=20)
-                shank.set_shank_ids(np.ones(8, dtype='int'))
-                demo_probe = prif.combine_probes([shank])
-                demo_probe.set_contact_ids(np.arange(8))
-                demo_probe.set_device_channel_indices(np.array([5,2,3,0,6,7,4,1]))
-                demo_probe.annotate(**{'name':'demo_probe'})
-                _ = ephys.write_probe_file(demo_probe, default_probe_file)
-            if not os.path.exists(default_param_file):
-                param_dict = ephys.get_original_defaults()
-                _ = ephys.write_param_file(param_dict, default_param_file)
-            # save base folders
-            llist = [str(os.getcwd()),      # raw data folder
-                     str(os.getcwd()),      # processed data folder
-                     default_probe_folder,  # probe configuration folder
-                     '',                    # probe configuration file (optional)
-                     default_param_file]    # param configuration file
-            ephys.write_base_dirs(llist)
-        
         # load base data directories
-        self.BASE_FOLDERS = ephys.base_dirs()
-        if not os.path.isdir(self.BASE_FOLDERS[0]):  # raw data
-            self.BASE_FOLDERS[0] = str(os.getcwd())
-        if not os.path.isdir(self.BASE_FOLDERS[1]):  # processed data
-            self.BASE_FOLDERS[1] = str(os.getcwd())
-        if not os.path.isdir(self.BASE_FOLDERS[2]):  # probe files
-            self.BASE_FOLDERS[2] = str(os.getcwd())
-        if not os.path.isfile(self.BASE_FOLDERS[3]): # default probe
-            self.BASE_FOLDERS[3] = ''
-        if not os.path.isfile(self.BASE_FOLDERS[4]): # default settings
-            self.BASE_FOLDERS[4] = ''
-        ephys.write_base_dirs(list(self.BASE_FOLDERS))
-        
-        # initial parameter dictionary (or None)
-        self.PARAMS, _ = ephys.read_param_file(filepath=self.BASE_FOLDERS[4])
-        if self.PARAMS is None:
-            self.PARAMS = ephys.get_original_defaults()  # use hard-coded defaults
+        if not os.path.exists('default_folders.txt'):
+            ephys.init_default_folders()
+        ephys.clean_base_dirs()
         
         self.gen_layout()
-        
         self.show()
         self.center_window()
         
@@ -157,26 +113,44 @@ class hippos(QtWidgets.QMainWindow):
         self.centralLayout.addWidget(self.analyze_btn)
         
         self.setCentralWidget(self.centralWidget)
+    
+    def base_folder_popup(self):
+        """ View or change base data directories """
+        sp.BaseFolderPopup.run(parent=self)
+    
+    def view_param_popup(self):
+        """ View/edit default parameters """
+        PARAMS = ephys.read_params()
+        self.param_dlg = gi.ParamSettings(PARAMS, parent=self)
+        self.param_dlg.show()
+        self.param_dlg.raise_()
+        res = self.param_dlg.exec()
+        if res:  # existing param file updated by user
+            a, b, c, param_path = ephys.base_dirs()
+            save_path = str(self.param_dlg.SAVE_LOCATION)
+            if param_path != save_path:
+                fname = os.path.basename(save_path)
+                res2 = QtWidgets.QMessageBox.question(self, '', f'Use {fname} as default parameter file?')
+                if res2 == QtWidgets.QMessageBox.Yes:
+                    llist = [a,b,c,save_path]
+                    ephys.write_base_dirs(llist)
         
     def probe_popup(self):
+        """ Build probe objects """
         _ = probegod.run_probe_window(accept_visible=False, title='Create probe', parent=self)
         
-        
-    def raw_data_popup(self, mode=2, init_raw_ddir='', init_save_ddir=''):
+    def raw_data_popup(self, mode=2, init_raw_ddir=''):
         """ Select raw data for processing """
-        popup = sp.RawDirectorySelectionPopup(mode, init_raw_ddir, init_save_ddir, 
-                                              PARAMS=self.PARAMS, parent=self)
+        popup = sp.RawDirectorySelectionPopup(mode, init_raw_ddir, parent=self)
         res = popup.exec()
         if not res:
             return
-        
         
     def processed_data_popup(self, _, init_ddir=None, go_to_last=True):
         """ Show processed data options """
         self.analysis_popup.show()
         self.analysis_popup.raise_()
         
-    
     def ch_selection_popup(self):
         """ Launch event channel selection window """
         ddir = self.analysis_popup.ddir
@@ -190,63 +164,30 @@ class hippos(QtWidgets.QMainWindow):
         # check for updated files, enable/disable analysis options
         iprb = int(self.ch_selection_dlg.iprb)
         self.analysis_popup.ab.ddir_toggled(ddir, iprb)
-        
     
     def classify_ds_popup(self):
         """ Launch DS analysis window """
         ddir = self.analysis_popup.ddir
         iprb = self.analysis_popup.probe_idx
-        self.classify_ds_dlg = DS_CSDWindow(ddir, iprb, self.PARAMS, parent=self.analysis_popup)
+        DS_DF = pd.read_csv(Path(ddir, f'DS_DF_{iprb}'))
+        if DS_DF.empty:
+            QtWidgets.QMessageBox.critical(self.analysis_popup, '', 'No dentate spikes detected on the hilus channel.')
+            return
+        PARAMS = ephys.load_recording_params(ddir)
+        self.classify_ds_dlg = DS_CSDWindow(ddir, iprb, PARAMS, parent=self.analysis_popup)
         self.classify_ds_dlg.show()
         self.classify_ds_dlg.raise_()
         _ = self.classify_ds_dlg.exec()
         # check for updated files, enable/disable analysis options
         self.analysis_popup.ab.ddir_toggled(ddir)
         
-        
-    def view_param_popup(self):
-        """ View/edit default parameters """
-        if self.PARAMS is None:
-            self.param_msgbox = gi.MsgboxParams(ephys.base_dirs()[4], parent=self)
-            self.param_msgbox.show()
-            self.param_msgbox.raise_()
-            res = self.param_msgbox.exec()
-            #pdb.set_trace()
-            if res:  # new valid param file loaded or created by user
-                self.PARAMS,_ = ephys.read_param_file(self.param_msgbox.PARAM_FILE)
-                self.BASE_FOLDERS[4] = self.param_msgbox.PARAM_FILE
-                ephys.write_base_dirs(list(self.BASE_FOLDERS))
-        else:
-            self.param_dlg = gi.ParamSettings(self.PARAMS, parent=self)
-            self.param_dlg.show()
-            self.param_dlg.raise_()
-            res = self.param_dlg.exec()
-            if res:  # existing param file updated by user
-                self.PARAMS,_ = ephys.read_param_file(self.param_dlg.SAVE_LOCATION)
-                self.BASE_FOLDERS[4] = self.param_dlg.SAVE_LOCATION
-                ephys.write_base_dirs(list(self.BASE_FOLDERS))
-        
-        
-    def base_folder_popup(self):
-        """ View or change base data directories """
-        dlg = sp.BaseFolderPopup(parent=self)
-        dlg.show()
-        dlg.raise_()
-        dlg.exec()
-        self.BASE_FOLDERS = ephys.base_dirs()
-        self.PARAMS, _ = ephys.read_param_file(filepath=self.BASE_FOLDERS[4])
-        if self.PARAMS is None:
-            self.PARAMS = ephys.get_original_defaults()  # use hard-coded defaults
-        
-    
     def center_window(self):
         """ Move GUI to center of screen """
         qrect = self.frameGeometry()  # proxy rectangle for window with frame
         screen_rect = QtWidgets.QDesktopWidget().screenGeometry()
         qrect.moveCenter(screen_rect.center())  # move center of qr to center of screen
         self.move(qrect.topLeft())
-        
-    
+
 if __name__ == '__main__':
     app = pyfx.qapp()
     w = hippos()
