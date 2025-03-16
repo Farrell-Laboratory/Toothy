@@ -22,6 +22,7 @@ import probeinterface as prif
 import pdb
 # custom modules
 import pyfx
+import qparam
 import icsd
 
 
@@ -41,144 +42,88 @@ def base_dirs(return_keys=False):
 
 def write_base_dirs(ddir_list):
     """ Save input directories to default_folders.txt """
-    assert len(ddir_list) == 5
+    assert len(ddir_list) == 4
     with open('default_folders.txt', 'w') as fid:
-        for k,path in zip(['RAW_DATA','PROCESSED_DATA','PROBE_FILES', 'DEFAULT_PROBE', 'DEFAULT_PARAMETERS'], ddir_list):
+        for k,path in zip(['RAW_DATA','PROBE_FILES','DEFAULT_PROBE', 'DEFAULT_PARAMETERS'], ddir_list):
             fid.write(k + ' = ' + str(path) + '\n')
 
-def lines2dict(lines):
-    """ Parse list of text strings ($lines) and return parameter dictionary """
-    PARAMS = {}
-    for line in lines:
-        d = line.split(';')[0]
-        k,v = [x.strip() for x in d.split('=')]
-        if v.startswith('[') and v.endswith(']'):
-            val = [float(x.strip()) for x in v[1:-1].split(',')]
-        else:
-            try    : val = float(v)
-            except : val = str(v)
-        if   val == 'True'  : val = True
-        elif val == 'False' : val = False
-        PARAMS[k] = val
-    return PARAMS
+def clean_base_dirs():
+    # make sure default_folders.txt is in the correct format
+    keys,paths = map(list, zip(*base_dirs(return_keys=True)))
+    if 'RAW_DATA' in keys and os.path.isdir(paths[keys.index('RAW_DATA')]):
+        raw_data_path = paths[keys.index('RAW_DATA')]
+    else: raw_data_path = str(os.getcwd())
+    if 'PROBE_FILES' in keys and os.path.isdir(paths[keys.index('PROBE_FILES')]):
+        probe_file_path = paths[keys.index('PROBE_FILES')]
+    else: probe_file_path = str(os.getcwd())
+    if 'DEFAULT_PROBE' in keys and os.path.isfile(paths[keys.index('DEFAULT_PROBE')]):
+        default_probe_path = paths[keys.index('DEFAULT_PROBE')]
+    else: default_probe_path = ''
+    if 'DEFAULT_PARAMETERS' in keys and os.path.isfile(paths[keys.index('DEFAULT_PARAMETERS')]):
+        param_path = paths[keys.index('DEFAULT_PARAMETERS')]
+    else:
+        param_path = Path(os.getcwd(), 'default_params.txt')
+        if not os.path.isfile(param_path):
+            print('Parameter file not found. Creating default_params.txt file ...')
+            tmp = qparam.get_original_defaults()
+            _ = write_param_file(tmp, param_path)
+    # validate parameter file
+    ddict, invalid_params = read_param_file(param_path, return_none=False)
+    if len(invalid_params) > 0:
+        fname = os.path.basename(param_path)
+        print(f'Replaced {len(invalid_params)} missing or invalid parameter(s) in {fname} with default value(s).')
+        new_dict = qparam.fix_params(ddict)
+        _ = write_param_file(new_dict, param_path)
+    # save base folders
+    llist = [raw_data_path, probe_file_path, default_probe_path, param_path]
+    write_base_dirs(llist)
+    
+def init_default_folders():
+    """ Generate an initial default_folders.txt file """
+    print('Initializing application settings ...')
+    default_data_folder  = os.getcwd()
+    default_probe_folder = Path(os.getcwd(), 'probe_configs')
+    default_probe_file   = ''
+    default_param_file   = Path(os.getcwd(), 'default_params.txt')
+    if not os.path.isdir(default_probe_folder):
+        print('Creating "probe_config" folder with demo probe configuration file ...')
+        os.makedirs(default_probe_folder)  # initialize probe folder
+        prb = demo_probe()
+        _ = write_probe_file(prb, Path(default_probe_folder, 'demo_probe_config.json'))
+    if not os.path.isfile(default_param_file):
+        print('Creating default parameter file ...')
+        param_dict = qparam.get_original_defaults()
+        _ = write_param_file(param_dict, default_param_file)
+    llist = [default_data_folder,  # raw data folder
+             default_probe_folder, # probe configuration folder
+             '',                   # default probe file (optional)
+             default_param_file]   # parameter file
+    write_base_dirs(llist)
+    print('Done!' + os.linesep)
+    
+def read_params():
+    """ Return parameter dictionary from current param file """
+    ddict = qparam.fix_params(read_param_file(base_dirs()[3], return_none=False)[0])
+    return ddict
 
-def get_original_defaults():
-    PARAMS = {
-             'lfp_fs' : 1000.0,
-             'theta' : [6.0, 10.0],
-             'slow_gamma' : [25.0, 55.0],
-             'fast_gamma' : [60.0, 100.0],
-             'ds_freq' : [5.0, 100.0],
-             'ds_height_thr' : 4.5,
-             'ds_dist_thr' : 100.0,
-             'ds_prom_thr' : 0.0,
-             'ds_wlen' : 125.0,
-             'swr_freq' : [120.0, 180.0],
-             'swr_ch_bound' : 5.0,
-             'swr_height_thr' : 5.0,
-             'swr_min_thr' : 3.0,
-             'swr_dist_thr' : 100.0,
-             'swr_min_dur' : 25.0,
-             'swr_freq_thr' : 125.0,
-             'swr_freq_win' : 8.0,
-             'swr_maxamp_win' : 40.0,
-             'csd_method' : 'standard',
-             'f_type' : 'gaussian',
-             'f_order' : 3.0,
-             'f_sigma' : 1.0,
-             'vaknin_el' : True, 
-             'tol' : 1e-06,
-             'spline_nsteps' : 200.0,
-             'src_diam' : 0.5,
-             'src_h' : 0.1,
-             'cond' : 0.3,
-             'cond_top' : 0.3,
-             'clus_algo' : 'kmeans',
-             'nclusters' : 2.0,
-             'eps' : 0.2,
-             'min_clus_samples' : 3.0,
-             'el_w' : 15.0,
-             'el_h' : 15.0,
-             'el_shape' : 'circle'
-             }
-    return PARAMS
-    
-
-def validate_params(ddict):
-    """ Determine whether input $ddict is a valid parameter dictionary
-    @Returns
-    is_valid - boolean value (True if all critical parameters are valid, False if not)
-    valid_ddict - dictionary with validation result for each critical parameter
-    """
-    
-    def is_number(key): # numerical parameter value
-        return bool(key in ddict and type(ddict[key]) in [float, int])
-    
-    def is_range(key):  # list of two parameter values
-        return bool(key in ddict and isinstance(ddict[key], list) and len(ddict[key])==2)
-    
-    def is_category(key, options):  # categorical (string) parameter value
-        return bool(key in ddict and ddict[key] in options)
-        
-    # make sure each parameter 1) is present in dictionary and 2) has a valid value
-    valid_ddict = {
-                  'lfp_fs' : is_number('lfp_fs'),
-                  'theta' : is_range('theta'),
-                  'slow_gamma' : is_range('slow_gamma'),
-                  'fast_gamma' : is_range('fast_gamma'),
-                  'ds_freq' : is_range('ds_freq'),
-                  'swr_freq' : is_range('swr_freq'),
-                  'ds_height_thr' : is_number('ds_height_thr'),
-                  'ds_dist_thr' : is_number('ds_dist_thr'),
-                  'ds_prom_thr' : is_number('ds_prom_thr'),
-                  'ds_wlen' : is_number('ds_wlen'),
-                  'swr_ch_bound' : is_number('swr_ch_bound'),
-                  'swr_height_thr' : is_number('swr_height_thr'),
-                  'swr_min_thr' : is_number('swr_min_thr'),
-                  'swr_dist_thr' : is_number('swr_dist_thr'),
-                  'swr_min_dur' : is_number('swr_min_dur'),
-                  'swr_freq_thr' : is_number('swr_freq_thr'),
-                  'swr_freq_win' : is_number('swr_freq_win'),
-                  'swr_maxamp_win' : is_number('swr_maxamp_win'),
-                  'csd_method' : is_category('csd_method', ['standard','delta','step','spline']), 
-                  'f_type' : is_category('f_type', ['gaussian','identity','boxcar','hamming','triangular']),
-                  'f_order' : is_number('f_order'),
-                  'f_sigma' : is_number('f_sigma'),
-                  'vaknin_el' : is_category('vaknin_el', [True, False]), 
-                  'tol' : is_number('tol'),
-                  'spline_nsteps' : is_number('spline_nsteps'),
-                  'src_diam' : is_number('src_diam'),
-                  'src_h' : is_number('src_h'),
-                  'cond' : is_number('cond'),
-                  'cond_top' : is_number('cond_top'),
-                  'clus_algo' : is_category('clus_algo', ['kmeans','dbscan']),
-                  'nclusters' : is_number('nclusters'),
-                  'eps' : is_number('eps'),
-                  'min_clus_samples' : is_number('min_clus_samples'),
-                  'el_w' : is_number('el_w'),
-                  'el_h' : is_number('el_h'),
-                  'el_shape' : is_category('el_shape', ['circle', 'square', 'rectangle'])
-                  }
-    is_valid = bool(all(valid_ddict.values()))
-    return is_valid, valid_ddict
-    
-
-def read_param_file(filepath='default_params.txt', exclude_fs=False):
+def read_param_file(filepath='default_params.txt', exclude_fs=False, return_none=True):
     """ Return dictionary of parameters loaded from .txt file """
-    if not os.path.exists(filepath):
+    try: # read in param file, parse lines and organize into key:value dictionary
+        assert os.path.exists(filepath) and os.path.isfile(filepath)
+        PARAMS = qparam.read_lines(filepath)
+    except:
         return None, []
-    with open(filepath, 'r') as f:
-        lines = [l.strip() for l in f.readlines()]
-    lines = [l for l in lines if not l.startswith('#') and len(l) > 0]
-    # convert text lines to parameter dictionary, validate param values
-    PARAMS = lines2dict(lines)
-    is_valid, valid_ddict = validate_params(PARAMS)
+   # check for missing/invalid parameters
+    is_valid, valid_ddict = qparam.validate_params(PARAMS)
     if is_valid:
         if exclude_fs: _ = PARAMS.pop('lfp_fs')
         return PARAMS, []  # return parameter dictionary and empty list
     else:
         invalid_params = [k for k,v in valid_ddict.items() if v==False]
-        return None, invalid_params  # return None and list of invalid parameters
+        if return_none:  # return None and list of invalid parameters
+            return None, invalid_params  
+        else:            # return loaded params and list of invalid params
+            return PARAMS, invalid_params
 
 def write_param_file(PARAMS, filepath='default_params.txt'):
     """ Save parameter dictionary to .txt file """
@@ -188,6 +133,7 @@ def write_param_file(PARAMS, filepath='default_params.txt'):
     for k,v in PARAMS.items():
         fid.write(f'{k} = {v};' + os.linesep)
     fid.close()
+    return True
 
 def read_notes(filepath):
     """ Load any recording notes from .txt file """
@@ -225,8 +171,7 @@ def save_recording_params(ddir, PARAMS):
     if 'PROCESSED_DATA_FOLDER' in PARAMS.keys() : del PARAMS['PROCESSED_DATA_FOLDER']
     with open(Path(ddir, 'params.pkl'), 'wb') as f:
         pickle.dump(PARAMS, f)
-        
-
+    
 def get_openephys_session(ddir):
     """ Return top-level Session object of recording directory $ddir """
     session = None
@@ -246,7 +191,6 @@ def get_openephys_session(ddir):
             child_dir = str(parent_dir)
     return session
     
-
 def oeNodes(session, ddir):
     """ Return Open Ephys nodes from parent $session to child recording """
     # session is first node in path
@@ -281,7 +225,6 @@ def get_probe_filepaths(ddir):
         if tmp is not None:
             probe_files.append(f)
     return probe_files
-        
 
 def read_probe_file(fpath, raise_exception=False):
     """ Load probe configuration from .json, .mat, or .prb file """
@@ -293,11 +236,12 @@ def read_probe_file(fpath, raise_exception=False):
     ext = os.path.splitext(fpath)[-1]
     try:
         if ext == '.json':
-            probe = prif.io.read_probeinterface(fpath).probes[0]
+            prb = prif.io.read_probeinterface(fpath).probes[0]
         elif ext == '.prb':
-            probe = prif.io.read_prb(fpath).probes[0]
+            prb = prif.io.read_prb(fpath).probes[0]
         elif ext == '.mat':
-            probe = mat2probe(fpath)
+            prb = mat2probe(fpath)
+        probe = copy_probe(prb)
         # keep probe name consistent with the file name
         probe.name = os.path.splitext(os.path.basename(fpath))[0].replace('_config','')
     except:
@@ -306,7 +250,6 @@ def read_probe_file(fpath, raise_exception=False):
             raise Exception('Invalid probe file')
     return probe
 
-        
 def mat2probe(fpath):
     """ Load probe config from .mat file """
     file = so.loadmat(fpath, squeeze_me=True)
@@ -320,7 +263,6 @@ def mat2probe(fpath):
     probe.set_device_channel_indices(np.array(file['chanMap0ind']))
     return probe
 
-        
 def write_probe_file(probe, fpath):
     """ Write probe configuration to .json, .mat, .prb, or .csv file """
     ext = os.path.splitext(fpath)[-1]
@@ -341,7 +283,6 @@ def write_probe_file(probe, fpath):
         return False
     return True
 
-
 def probe2mat(probe, fpath):
     """ Save probe config as .mat file"""
     chanMap = probe.device_channel_indices
@@ -360,6 +301,14 @@ def probe2mat(probe, fpath):
     so.savemat(fpath, probe_dict)
     return True
 
+def copy_probe(probe):
+    """ Return new probe object identical to the given $probe """
+    probe_new = probe.copy()
+    probe_new.annotate(**dict(probe.annotations))
+    probe_new.set_shank_ids(np.array(probe.shank_ids))
+    probe_new.set_contact_ids(np.array(probe.contact_ids))
+    probe_new.set_device_channel_indices(np.array(probe.device_channel_indices))
+    return probe_new
 
 def make_probe_group(probe, n=1):
     """ For multi-probe recordings, create group of $n probes to map channels """
@@ -374,6 +323,19 @@ def make_probe_group(probe, n=1):
         PG.add_probe(prb)
     return PG
 
+def demo_probe():
+    """ Return 8-channel linear probe object """
+    shank = prif.generate_linear_probe(num_elec=8, ypitch=50)
+    pos_adj = shank.contact_positions[::-1] + np.array([0, 50])
+    shank.set_contacts(pos_adj, shapes='circle', 
+                            shape_params=dict(radius=7.5))
+    shank.create_auto_shape('tip', margin=20)
+    shank.set_shank_ids(np.zeros(8, dtype='int'))
+    probe = prif.combine_probes([shank])
+    probe.set_contact_ids(np.arange(8))
+    probe.set_device_channel_indices(np.array([5,2,3,0,6,7,4,1]))
+    probe.annotate(**{'name':'demo_probe'})
+    return probe
 
 def read_array_file(fpath, raise_exception=False):
     """ Load raw data from .npy, .mat, or .csv file """
