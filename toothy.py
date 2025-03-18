@@ -26,7 +26,7 @@ from probe_handler import probegod
 from channel_selection_gui import ChannelSelectionWindow
 from ds_classification_gui import DS_CSDWindow
     
-class hippos(QtWidgets.QMainWindow):
+class toothy(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         # load base data directories
@@ -41,7 +41,7 @@ class hippos(QtWidgets.QMainWindow):
     
     def gen_layout(self):
         """ Set up layout """
-        self.setWindowTitle('Hippos')
+        self.setWindowTitle('Toothy')
         self.setContentsMargins(25,25,25,25)
         
         self.centralWidget = QtWidgets.QWidget()
@@ -190,7 +190,7 @@ class hippos(QtWidgets.QMainWindow):
 
 if __name__ == '__main__':
     app = pyfx.qapp()
-    w = hippos()
+    w = toothy()
     w.show()
     w.raise_()
     sys.exit(app.exec())
