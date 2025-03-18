@@ -58,13 +58,13 @@ class IFigLFP(QtWidgets.QWidget):
         self.lfp_time = lfp_time
         self.lfp_fs = lfp_fs
         self.PARAMS = PARAMS
-        self.channels = np.arange(self.DATA['raw'].shape[0])
         
         twin = kwargs.get('twin', 1)
         event_channels = kwargs.get('event_channels', [0,0,0])
         self.ch_cmap = pd.Series(['blue', 'green', 'red'], index=event_channels)
         
-        self.probe = kwargs.get('probe', None)
+        #self.probe = kwargs.get('probe', None)
+        self.shank = kwargs.get('shank', None)
         self.AUX = kwargs.get('AUX', np.full(len(self.lfp_time), np.nan))
         self.DS_ALL = kwargs.get('DS_ALL', None)
         self.SWR_ALL = kwargs.get('SWR_ALL', None)
@@ -174,8 +174,6 @@ class IFigLFP(QtWidgets.QWidget):
             self.xspan = xmax - xmin
             self.canvas.draw_idle()
             
-        
-            
         self.xspan = 0
         self.span = matplotlib.widgets.SpanSelector(ax=self.ax,
                                                     onselect=onselect,
@@ -192,11 +190,15 @@ class IFigLFP(QtWidgets.QWidget):
             ### SELECT CHANNEL ###
             if event.button == matplotlib.backend_bases.MouseButton.RIGHT:
                 # get closest channel/timepoint to clicked point
-                ch = abs(int(round(event.ydata)))
+                ch = -int(round(event.ydata))
+                # NEWSHANK
+                if ch not in self.shank_channels: return
+                ich = list(self.shank_channels).index(ch)
+                ###
                 idx = pyfx.IdxClosest(event.xdata, self.lfp_time)
                 tpoint = round(self.lfp_time[idx], 2)
                 # highlight selected channel/timepoint
-                xdata, ydata = self.ax.get_lines()[ch].get_data()
+                xdata, ydata = self.ax.get_lines()[ich].get_data() # NEWSHANK (ich)
                 shadow = self.ax.plot(xdata, ydata, color='yellow', zorder=-1, lw=5)[0]
                 vline = self.ax.axvline(tpoint, color='indigo', zorder=-1, lw=2, ls='--')
                 self.canvas.draw_idle()
@@ -266,7 +268,7 @@ class IFigLFP(QtWidgets.QWidget):
                                  asym=ephys.get_asym(ipk,istart,istop), prom=props['prominences'][0],
                                  start=self.lfp_time[istart], stop=self.lfp_time[istop],
                                  idx=imax, idx_peak=ipk, idx_start=istart, idx_stop=istop,
-                                 status=2, is_valid=1) #ffindme
+                                 status=2, is_valid=1)
                 elif self.ADD_SWR:
                     half_win = int(iwin/2)
                     # get SWR envelope peak in central half of window
@@ -391,25 +393,28 @@ class IFigLFP(QtWidgets.QWidget):
                     
                 elif event.key=='enter' and self.coord_electrode is not None:
                     # plot temporary CSD
-                    arr = self.DATA['raw'][:, imin:imax]
+                    arr = self.DATA['raw'][self.shank_channels, imin:imax] # NEWSHANK
                     arr2 = np.array(arr)
-                    noise_idx = np.nonzero(self.NOISE_TRAIN)[0]
-                    clean_idx = np.setdiff1d(np.arange(arr.shape[0]), noise_idx)
+                    noise_idx_rel = np.nonzero(self.NOISE_TRAIN[self.shank_channels])[0]
+                    clean_idx_rel = np.setdiff1d(np.arange(arr.shape[0]), noise_idx_rel)
                     # replace noisy channels with the average of its two closest neighbors
-                    for i in noise_idx:
+                    for i in noise_idx_rel:
                         if i == 0:
-                            interp_sig = np.array(arr[min(clean_idx)])
-                        elif i > max(clean_idx):
-                            interp_sig = np.array(arr[max(clean_idx)])
+                            interp_sig = np.array(arr[min(clean_idx_rel)])
+                        elif i > max(clean_idx_rel):
+                            interp_sig = np.array(arr[max(clean_idx_rel)])
                         else:
-                            sig1 = arr[pyfx.Closest(i, clean_idx[clean_idx < i])]
-                            sig2 = arr[pyfx.Closest(i, clean_idx[clean_idx > i])]
+                            sig1 = arr[pyfx.Closest(i, clean_idx_rel[clean_idx_rel < i])]
+                            sig2 = arr[pyfx.Closest(i, clean_idx_rel[clean_idx_rel > i])]
                             interp_sig = np.nanmean([sig1, sig2], axis=0)
                         arr2[i,:] = interp_sig
                     # calculate CSD
                     csd_obj = ephys.get_csd_obj(arr2, self.coord_electrode, self.PARAMS)
                     csd = ephys.csd_obj2arrs(csd_obj)[1]
-                    yax  = np.linspace(-1, len(csd), len(csd)) * -1
+                    # NEWSHANK
+                    a,b = pyfx.Edges(self.shank_channels)
+                    yax = np.linspace(a-1, b+1, len(csd)) * -1
+                    #yax  = np.linspace(-1, len(csd), len(csd)) * -1
                     try:
                         _ = self.ax.pcolorfast(self.lfp_time[imin:imax], yax, csd, 
                                                cmap=plt.get_cmap('bwr'))
@@ -454,27 +459,29 @@ class IFigLFP(QtWidgets.QWidget):
     
     def plot_freq_band_pwr(self):
         _ = [ax.clear() for ax in self.faxs]
-        
         self.freq_kw = dict(xytext=(4,4), xycoords=('axes fraction','data'), 
                             bbox=dict(facecolor='w', edgecolor='w', 
                                       boxstyle='square,pad=0.0'),
                             textcoords='offset points', va='bottom', 
                             fontweight='semibold', annotation_clip=True)
-        yax = self.channels * -1
         # (channel, color) for each event
         (TH,THC), (RPL,RPLC), (HIL,HILC) = self.ch_cmap.items()
-        noise_idx = np.nonzero(self.NOISE_TRAIN)[0] #findme
-        if len(noise_idx) == 0:  # no noisy channels, use original freq data
+        
+        # NEWSHANK
+        noise_idx_rel = np.nonzero(self.NOISE_TRAIN[self.shank_channels])[0]
+        if (len(noise_idx_rel) == 0) and (len(self.shank_channels) == len(self.STD)):
             tmp = self.STD[['norm_theta','norm_swr','slow_gamma','fast_gamma']].values.T
             norm_theta, norm_swr, slow_gamma, fast_gamma = tmp
-        else:                    # re-normalize to exclude 1+ noisy channels
-            freq_data = self.STD[['theta','swr','slow_gamma','fast_gamma']].values.T
-            for i,d in enumerate(freq_data):
-                d[noise_idx] = np.nan
+        else:
+            freq_data = self.STD.loc[self.shank_channels, ['theta','swr','slow_gamma','fast_gamma']].values.T
+            if len(noise_idx_rel)>0:
+                for i,d in enumerate(freq_data):
+                    d[noise_idx_rel] = np.nan
             norm_theta = pyfx.Normalize(freq_data[0])
             norm_swr = pyfx.Normalize(freq_data[1])
             slow_gamma, fast_gamma = freq_data[2:]
         
+        yax = np.array(self.shank_channels * -1)
         # plot theta power
         self.faxs[0].plot(norm_theta, yax, color='black')
         self.faxs[0].axhline(TH*-1, c=THC)
@@ -502,24 +509,46 @@ class IFigLFP(QtWidgets.QWidget):
         self.faxs[1].spines['left'].set_visible(False)
         self.faxs[2].spines['left'].set_visible(False)
         
+        _ = self.faxs[0].set_yticks(yax, labels=np.int16(abs(yax)).astype('str')) # NEWSHANK
+        
+        self.canvas_freq.draw_idle()
         
     def switch_the_probe(self, **kwargs):
         self.DATA = kwargs['DATA']
-        event_channels = kwargs.get('event_channels', [0,0,0])
-        self.ch_cmap = pd.Series(['blue', 'green', 'red'], index=event_channels)
-        
-        self.probe = kwargs.get('probe', None)
         self.DS_ALL = kwargs.get('DS_ALL', None)
         self.SWR_ALL = kwargs.get('SWR_ALL', None)
         self.STD = kwargs.get('STD', None)
         self.NOISE_TRAIN = kwargs.get('NOISE_TRAIN', None)
         self.seizures = kwargs.get('seizures', [])
-        
+        # NEWSHANK
+        #self.probe = kwargs.get('probe', None)
+        _shank = kwargs.get('shank', None)
+        _event_channels = kwargs.get('event_channels', [0,0,0])
+        self.switch_the_shank(shank=_shank, event_channels=_event_channels)
+    
+    def switch_the_shank(self, **kwargs):
+        # NEWSHANK
+        self.shank = kwargs.get('shank', None)
+        event_channels = kwargs.get('event_channels', [0,0,0])
+        self.ch_cmap = pd.Series(['blue', 'green', 'red'], index=event_channels)
         self.init_event_items()
         self.channel_changed(*event_channels)  # set event channels (and DS/SWR indices)
-        
+        self.plot_freq_band_pwr()
     
     def init_event_items(self):
+        # try getting electrode geometry in meters
+        self.coord_electrode = None
+        # NEWSHANK
+        if self.shank is None:
+            self.shank_channels = np.arange(self.DATA['raw'].shape[0])
+        else:
+            self.shank_channels = np.array(self.shank.get_indices())
+            ypos = np.array(sorted(self.shank.contact_positions[:, 1]))
+            self.coord_electrode = pq.Quantity(ypos, self.shank.probe.si_units).rescale('m')  # um -> m
+        
+        # get data timecourses
+        self.lfp_ampl = np.nansum(self.DATA['raw'][self.shank_channels, :], axis=0)
+        
         # initialize event indexes (empty), event trains (zeros)
         self.DS_idx = np.array(())
         self.DS_valid = np.array(())
@@ -532,15 +561,6 @@ class IFigLFP(QtWidgets.QWidget):
             self.SZR_train[iseq] = 1
         try: self.seizures_mid = np.array(list(map(pyfx.Center, self.seizures)))
         except: self.seizures_mid = np.array(())
-        
-        # get data timecourses
-        self.lfp_ampl = np.nansum(self.DATA['raw'], axis=0)
-        
-        # try getting electrode geometry in meters
-        self.coord_electrode = None
-        if self.probe is not None:
-            ypos = np.array(sorted(self.probe.contact_positions[:, 1]))
-            self.coord_electrode = pq.Quantity(ypos, self.probe.si_units).rescale('m')  # um -> m
     
     
     def update_event_items(self, event='all'):
@@ -610,16 +630,18 @@ class IFigLFP(QtWidgets.QWidget):
         i,iwin = self.iw.i.val, self.iw.iwin.val
         idx = np.arange(i-iwin, i+iwin)
         x = self.lfp_time[idx]
-        arr = self.DATA['raw']
+        arr = self.DATA['raw']#[self.shank_channels, :] # NEWSHANK
         self.iw.i.nsteps = int(iwin/2)
-        
         #self.ax.plot(x, self.AUX[idx] + 1, color='blue')
         
         # scale signals based on y-slider value
         if   self.iw.ycoeff.val < -1 : coeff = 1/np.abs(self.iw.ycoeff.val) * 2
         elif self.iw.ycoeff.val >  1 : coeff = self.iw.ycoeff.val / 2
         else                         : coeff = 1
-        for irow,y in enumerate(arr):
+        #for irow,y in enumerate(arr):
+        for irow in self.shank_channels:
+            y = arr[irow]
+            
             clr = self.ch_cmap.get(irow, 'black')
             if isinstance(clr, pd.Series): clr = clr.values[0]
             # plot LFP signals (-y + irow, then invert y-axis)
@@ -672,8 +694,9 @@ class IFigLFP(QtWidgets.QWidget):
         if self.canvas_freq.isVisible():
             self.plot_freq_band_pwr()
         
-        yticks = np.array([y for y in self.ax.get_yticks() if pyfx.InRange(y, *self.ax.get_ybound())])
-        self.ax.set_yticks(yticks, labels=np.int16(abs(yticks)).astype('str'))
+        #yticks = np.array([y for y in self.ax.get_yticks() if pyfx.InRange(y, *self.ax.get_ybound())])
+        yticks = -np.array(self.shank_channels)# NEWSHANK
+        _ = self.ax.set_yticks(yticks, labels=np.int16(abs(yticks)).astype('str'))
         self.canvas.draw_idle()
         
     def closeEvent(self, event):
@@ -688,13 +711,15 @@ class IFigEvent(QtWidgets.QWidget):
     FLAG = 0  # 0=plot average waveform, 1=plot individual events
     EXCLUDE_NOISE = False
     annot_dict = dict(time='{time:.2f} s')
-    CHC = pd.Series(pyfx.rand_hex(96))
+    CHC = pd.Series(pyfx.rand_hex(9999))
     
-    def __init__(self, ch, DF_ALL, DATA, lfp_time, lfp_fs, PARAMS, **kwargs):
+    def __init__(self, ch, channels, DF_ALL, DATA, lfp_time, lfp_fs, PARAMS, **kwargs):
         super().__init__()
         
         # initialize params from input arguments
         self.ch = ch
+        self.channels = channels # NEWSHANK shank_channels
+        self.ch2irow = pd.Series(np.arange(len(channels)), index=channels)
         self.DF_ALL = DF_ALL
         self.DATA = DATA
         self.lfp_time = lfp_time
@@ -705,32 +730,41 @@ class IFigEvent(QtWidgets.QWidget):
         
         # get LFP and DF for the primary channel
         self.LFP_arr = self.DATA['raw']
-        self.LFP = self.LFP_arr[self.ch]
-        self.channels = np.arange(self.LFP_arr.shape[0])
-        self.NOISE_TRAIN = kwargs.get('NOISE_TRAIN', np.zeros(len(self.channels), dtype='int'))
-        self.NOISE_IDX = np.nonzero(self.NOISE_TRAIN)[0]
-        
+        # NEWSHANK
+        self.ich = int(self.ch2irow[ch])
+        self.LFP = self.LFP_arr[self.ich]
+        self.EVENT_NOISE_TRAIN = kwargs.get('EVENT_NOISE_TRAIN', np.zeros(len(self.channels), dtype='int'))
+        self.EVENT_NOISE_IDX = np.nonzero(self.EVENT_NOISE_TRAIN)[0]
+        ###
         # get DF means per channel, isolate DF of current channel
         self.DF_MEAN = self.DF_ALL.groupby('ch').agg('mean')
         self.DF_MEAN = ephys.replace_missing_channels(self.DF_MEAN, self.channels)
         self.DF_MEAN.insert(0, 'ch', self.DF_MEAN.index.values)
-        if self.ch in self.DF_ALL.ch:
-            self.DF = self.DF_ALL.loc[self.ch]
-        else:
+        # protect from shenanigans with empty or 1-item dataframes
+        num_events = list(self.DF_ALL.ch).count(self.ch)
+        if num_events == 0:
             self.DF = pd.DataFrame(columns=self.DF_ALL.columns)
+        elif num_events == 1:
+            self.DF = pd.DataFrame(self.DF_ALL.loc[self.ch]).T
+            for k,v in self.DF_ALL.dtypes.items():
+                self.DF[k] = self.DF[k].astype(v)
+        else:
+            self.DF = pd.DataFrame(self.DF_ALL.loc[self.ch])
         self.dt = self.lfp_time[1] - self.lfp_time[0]
+        
         # get event indexes / event train for the primary channel
         self.iev = np.atleast_1d(self.DF.idx.values)
         self.ev_train = np.full(self.lfp_time.shape, np.nan)
         for idx,istart,iend in self.DF[['idx','idx_start','idx_stop']].values:
             self.ev_train[istart : iend] = idx
+            
         self.CHC[self.ch] = 'red'
             
         # create structured annotation string
         self.annot_fmt = str_fmt(self.annot_dict, key='time', key_top=True)
         
         # initialize channel plotting list
-        self.CH_ON_PLOT = [int(self.ch)]  # ffindme (noise)
+        self.CH_ON_PLOT = [int(self.ch)]
         
         self.create_subplots(twin=twin)
         
@@ -770,23 +804,23 @@ class IFigEvent(QtWidgets.QWidget):
         ###   PLOT EVENTS FROM ALL CHANNELS   ###
         _ = ephys.plot_channel_events(self.DF_ALL, self.DF_MEAN,
                                       self.axs['gax0'], self.axs['gax1'], self.axs['gax2'],
-                                      pal=self.pal, noise_train=self.NOISE_TRAIN,
+                                      pal=self.pal, noise_train=self.EVENT_NOISE_TRAIN, # NEWSHANK
                                       exclude_noise=bool(self.EXCLUDE_NOISE), CHC=self.CHC)
-        # for ax in [self.axs[f'gax{i}'] for i in range(3)]:
-        #     if self.EXCLUDE_NOISE: ax.CM = ax.cmapNE
-        #     else: 
             
         # initial colormap
         
-        self.ch_gax0_artists = list(self.axs['gax0'].patches)
-        self.ch_gax1_artists = np.array([None] * len(self.channels)).astype('object')
-        self.ch_gax1_artists[self.DF_MEAN.n_valid > 0] = list(self.axs['gax1'].collections)
-        self.ch_gax2_polygons = []
+        # NEWSHANK
+        self.ch_gax0_artists = pd.Series(list(self.axs['gax0'].patches), index=self.channels) # bars
+        collections = np.array([None] * len(self.channels)).astype('object')
+        collections[self.DF_MEAN.n_valid > 0] = list(self.axs['gax1'].collections)
+        self.ch_gax1_artists = pd.Series(collections, index=self.channels) # collections
+        polygons = []
         for ch in self.channels:
             c = 'red' if ch == self.ch else self.CHC[ch]  # "highlight" given channel
             axv = self.axs['gax2'].axvspan(ch-0.25, ch+0.25, color=c, alpha=0.7, zorder=-5)
             axv.set_visible(False)
-            self.ch_gax2_polygons.append(axv)
+            polygons.append(axv)
+        self.ch_gax2_polygons = pd.Series(polygons, index=self.channels)
         
         ### create threshold artists
         # X axis (horizontal line at amplitude 0)
@@ -803,7 +837,7 @@ class IFigEvent(QtWidgets.QWidget):
         self.hThr_line.set_visible(False)
         self.thres_items = [self.hThr_line]
         # set threshold legend params
-        self.thres_leg_kw = dict(loc='lower right',  bbox_to_anchor=(1,1), 
+        self.thres_leg_kw = dict(loc='lower right',  bbox_to_anchor=(1,0.5), 
                                  title='Thresholds', draggable=True)
         
         # create sliders for scaling/navigation
@@ -854,19 +888,21 @@ class IFigEvent(QtWidgets.QWidget):
     def rescale_y(self):
         """ Automatically determine y-limits when updating data plot 
         (e.g. new data source, changed timescale, or toggled plot mode) """
+        if len(self.iev) == 0:
+            return
+        
         if self.FLAG == 0:
             if len(self.CH_ON_PLOT) == 1:
                 lfp_arr = ephys.getwaves(self.LFP, self.iev, self.iwin)
                 yerrs, _ = ephys.getyerrs(lfp_arr, mode='sem')
                 self.EY = pyfx.Limit(np.concatenate(yerrs), pad=0.05)
             else:
-                waves = [ephys.getavg(self.LFP_arr[xch],
+                waves = [ephys.getavg(self.LFP_arr[self.ch2irow[xch]], # NEWSHANK
                                       np.atleast_1d(self.DF_ALL.loc[xch].idx),
                                       self.iwin) for xch in self.CH_ON_PLOT]
                 self.EY = pyfx.Limit(np.concatenate(waves), pad=0.05)
         elif self.FLAG == 1:
-            self.EY = pyfx.Limit(ephys.getwaves(self.LFP, self.iev, self.iwin).flatten(),
-                                 pad=0.05)
+            self.EY = pyfx.Limit(ephys.getwaves(self.LFP, self.iev, self.iwin).flatten(), pad=0.05)
         ylim = pyfx.Limit(self.EY, pad=np.abs(self.iw.ywin.val), sign=np.sign(self.iw.ywin.val))
         self.ax.set_ylim(ylim)
         
@@ -922,7 +958,6 @@ class IFigEvent(QtWidgets.QWidget):
         """ Add (or remove) colored highlight on current channel data """
         #self.new_label_ch_data(x)
         #return
-        
         for xch in self.CH_ON_PLOT[1:]:
             ch_bar = self.ch_gax0_artists[xch]
             ch_coll = self.ch_gax1_artists[xch]
@@ -962,7 +997,6 @@ class IFigEvent(QtWidgets.QWidget):
         _ = [self.ax.add_artist(item) for item in visible_items]
         if len(visible_items) > 0:
             thres_legend = self.ax.legend(handles=visible_items, **self.thres_leg_kw)
-            thres_legend.setDraggable(True)
         else: thres_legend = None
         # add X and Y axes to plot (but not the legend)
         if self.xax_line.get_visible(): self.ax.add_line(self.xax_line)
@@ -987,7 +1021,7 @@ class IFigEvent(QtWidgets.QWidget):
                 # overlay other channel(s) for direct comparison
                 comparison_lines = []
                 for xch in self.CH_ON_PLOT[1:]:
-                    xmean = np.nanmean(ephys.getwaves(self.LFP_arr[xch],
+                    xmean = np.nanmean(ephys.getwaves(self.LFP_arr[self.ch2irow[xch]], # NEWSHANK
                                                 self.DF_ALL.loc[xch].idx,
                                                 self.iwin), axis=0)
                     line = self.ax.plot(self.ev_x, xmean, color=self.CHC[xch], lw=2, label=f'ch {xch}')[0]
@@ -1044,7 +1078,7 @@ class IFigSWR(IFigEvent):
             """ Plot raw vs filtered LFP data """
             if label == 'Raw' : self.LFP_arr = self.DATA['raw']
             else              : self.LFP_arr = self.DATA['swr']
-            self.LFP = self.LFP_arr[self.ch]
+            self.LFP = self.LFP_arr[self.ich]
             self.hilb = scipy.signal.hilbert(self.LFP)
             self.env = np.abs(self.hilb).astype('float32')
             
@@ -1134,7 +1168,7 @@ class IFigDS(IFigEvent):
             """ Plot raw vs filtered LFP data """
             if label == 'Raw' : self.LFP_arr = self.DATA['raw']
             else              : self.LFP_arr = self.DATA['ds']
-            self.LFP = self.LFP_arr[self.ch]
+            self.LFP = self.LFP_arr[self.ich]
             
             self.rescale_y()
             self.plot_event_data(event=None)
@@ -1514,7 +1548,7 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
     ch_signal = QtCore.pyqtSignal(int, int, int)  # user changed event channel
     noise_signal = QtCore.pyqtSignal(np.ndarray)  # user changed noise channels
     
-    def __init__(self, ddir, nchannels, ntimes, lfp_time, lfp_fs, event_channels, parent=None):
+    def __init__(self, ddir, ntimes, lfp_time, lfp_fs, event_channels, parent=None):
         super().__init__(parent)
         
         self.ddir = ddir
@@ -1570,16 +1604,27 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         ###   TOGGLE PROBES   ###
         
         # toggle between probes
-        self.probes_qlist = QtWidgets.QListWidget()
-        #self.probes_qlist.setFixedHeight(50)
-        self.probes_qlist.setStyleSheet(qlist_ss_main)
-        self.probes_qlist.setFocusPolicy(QtCore.Qt.NoFocus)
-        self.probes_qlist.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
-        self.probes_qlist.setSizeAdjustPolicy(self.probes_qlist.AdjustToContents)
+        
+        # NEWSHANK
+        qlists = []
+        for _ in range(2):
+            qlist = QtWidgets.QListWidget()
+            qlist.setStyleSheet(qlist_ss_main)
+            qlist.setFocusPolicy(QtCore.Qt.NoFocus)
+            qlist.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+            qlist.setSizeAdjustPolicy(qlist.AdjustToContents)
+            qlists.append(qlist)
+        self.probes_qlist, self.shanks_qlist = qlists
         # ignore item deselection (one probe must always be selected)
         fx = lambda q: (len(q.selectedItems())==0, q.item(q.currentRow()))
         fx2 = lambda x,item: item.setSelected(True) if x else None
         self.probes_qlist.itemSelectionChanged.connect(lambda: fx2(*fx(self.probes_qlist)))
+        self.shanks_qlist.itemSelectionChanged.connect(lambda: fx2(*fx(self.shanks_qlist)))
+        qlist_hlay = QtWidgets.QHBoxLayout()
+        qlist_hlay.setContentsMargins(0,0,0,0)
+        qlist_hlay.addWidget(self.probes_qlist)
+        qlist_hlay.addWidget(self.shanks_qlist)
+        #################
         
         self.tab_widget = QtWidgets.QTabWidget(parent=self)
         self.tab_widget.setObjectName('tab_widget')
@@ -1746,7 +1791,7 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         # set min/max channel values
         self.ch_inputs = [self.theta_input, self.swr_input, self.hil_input]
         for sbox in self.ch_inputs:
-            sbox.setRange(0, nchannels-1)
+            sbox.setKeyboardTracking(False)
         for reset_btn in [self.ds_reset, self.swr_reset, self.theta_reset]:
             reset_btn.setStyleSheet('QPushButton {font-size:25pt; padding:0px 0px 2px 2px;}')
             reset_btn.setMaximumSize(20,20)
@@ -1849,7 +1894,6 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         #                                           'padding : 5px;'
         #                                           '}'
         #                                           )
-        #ffindme
         # noise widget
         self.ch_noise_widget = gi.AddChannelWidget(add_btn_pos='left')
         self.ch_noise_widget.label.hide()
@@ -1955,23 +1999,27 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         bbox.addWidget(self.save_btn)
         bbox.addWidget(self.debug_btn)
         
-        self.settings_layout.addWidget(self.probes_qlist, stretch=0)
+        self.settings_layout.addLayout(qlist_hlay, stretch=0)  # NEWSHANK
         self.settings_layout.addWidget(self.tab_widget, stretch=2)
         self.settings_layout.addLayout(bbox, stretch=0)
     
     
     def set_channel_values(self, theta_chan, ripple_chan, hil_chan):
         """ Update channel selection widgets """
-        self.theta_input.setValue(theta_chan)
-        self.swr_input.setValue(ripple_chan)
-        self.hil_input.setValue(hil_chan)
+        # NEWSHANK
+        pyfx.stealthy(self.theta_input, theta_chan)
+        pyfx.stealthy(self.swr_input, ripple_chan)
+        pyfx.stealthy(self.hil_input, hil_chan)
+        #self.theta_input.setValue(theta_chan)
+        #self.swr_input.setValue(ripple_chan)
+        #self.hil_input.setValue(hil_chan)
     
     
     def emit_ch_signal(self):
         """ Emit signal with all 3 current event channels """
         event_channels = [int(item.value()) for item in self.ch_inputs]
         self.ch_signal.emit(*event_channels)
-        self.disable_event_noise()
+        #self.disable_event_noise()
     
     
     def get_item_channels(self, qwidget):
@@ -2025,6 +2073,25 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
                 self.noise_qlist.item(i).setSelected(bool(ch == qch))
             self.noise2clean_btn.click()
     
+    def init_shanks(self, shank_list, ishank):
+        # NEWSHANK
+        self.shanks_qlist.blockSignals(True)
+        self.shanks_qlist.clear()
+        items = [f'shank {i}' for i in range(len(shank_list))]
+        self.shanks_qlist.addItems(items)
+        self.shanks_qlist.setCurrentRow(ishank)
+        self.shanks_qlist.blockSignals(False)
+        self.shanks_qlist.setVisible(len(shank_list) > 1)
+        # adjust min/max event channel
+        shank_channels = shank_list[ishank].get_indices()
+        self.set_event_range(shank_channels)
+        
+    def set_event_range(self, shank_channels):
+        # NEWSHANK
+        for sbox in self.ch_inputs:
+            sbox.blockSignals(True)
+            sbox.setRange(min(shank_channels), max(shank_channels))
+            sbox.blockSignals(False)
     
     def set_noise_channels(self, noise_train):
         """ Update noise channel widgets """
@@ -2054,10 +2121,7 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         qlist_ch = self.get_item_channels(self.noise_qlist)[-1]
         dropdown_ch = self.get_item_channels(self.clean_dropdown)[-1]
         noise_train = np.zeros(len(qlist_ch) + len(dropdown_ch), dtype='int')
-        try:
-            noise_train[qlist_ch] = 1
-        except:
-            pdb.set_trace()
+        noise_train[qlist_ch] = 1
         self.noise_signal.emit(noise_train)
     
     # self-contained notes saving
@@ -2072,12 +2136,12 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
 class ChannelSelectionWindow(QtWidgets.QDialog):
     """ Main channel selection GUI """
     
-    def __init__(self, ddir, probe_list, iprb=0, parent=None):
+    def __init__(self, ddir, probe_list, iprb=0, ishank=0, parent=None):
         super().__init__(parent)
         qrect = pyfx.ScreenRect(perc_width=0.9)
         self.setGeometry(qrect)
         
-        self.init_data(ddir, probe_list, iprb)
+        self.init_data(ddir, probe_list, iprb, ishank)
         self.init_figs()
         self.gen_layout()
         self.connect_signals()
@@ -2087,16 +2151,20 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         self.setWindowTitle(title)
         self.show()
     
-    
-    def init_data(self, ddir, probe_list, iprb):
+    def init_data(self, ddir, probe_list, iprb, ishank=0):
         """ Initialize all recording variables """
         self.ddir = ddir
         self.probe_list = probe_list
-        self.iprb = iprb
+        # NEWSHANK
+        self.probe_shank_list = []
+        for prb in self.probe_list:
+            # initialize list of separate shanks within probe
+            shank_list = prb.get_shanks()
+            self.probe_shank_list.append(shank_list)
+        ####################
         
         # load params
         self.PARAMS = ephys.load_recording_params(ddir)
-        #self.INFO = ephys.load_recording_info(ddir)
         
         # load LFP signals, event dfs, and detection thresholds for all probes
         self.data_list, self.lfp_time, self.lfp_fs = ephys.load_lfp(ddir, '', -1)
@@ -2110,8 +2178,7 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         self.noise_list = ephys.load_noise_channels(ddir, -1)
         self.noise_list_orig = deepcopy(self.noise_list)
         self.std_list = ephys.csv2list(ddir, 'channel_bp_std')
-        self.NCH, self.NTS = self.data_list[0]['raw'].shape
-        
+        self.NTS = len(self.lfp_time)
         
         self.aux_array = ephys.load_aux(ddir)
         if len(self.aux_array) > 0:
@@ -2124,25 +2191,32 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
             #seqs = pyfx.get_sequences(np.nonzero(AUX)[0])
         #self.seizures, _, _ = ephys.load_seizures(ddir)
         
-        # load (or estimate) event channels for all probes
-        self.event_channel_list = []
-        for i in range(len(self.probe_list)):
-            event_channels = ephys.load_event_channels(ddir, i, DATA=self.data_list[i], 
-                                                       STD=self.std_list[i], 
-                                                       NOISE_TRAIN=self.noise_list[i])
-            self.event_channel_list.append(event_channels)
+        self.event_channel_list = []      # loaded/estimated event channels
+        self.event_channel_list_file = [] # event channels saved to file (if any)
+        # NEWSHANK
+        for _iprb,prb in enumerate(self.probe_list):
+            probe_shank_event_channels = ephys.load_event_channels(ddir, _iprb, ishank=-1)
+            self.event_channel_list_file.append(list(probe_shank_event_channels))
+            for _ishank, shank in enumerate(self.probe_shank_list[_iprb]):
+                if len(probe_shank_event_channels[_ishank]) != 3:
+                    # estimate event channels from data
+                    shank_channels = shank.get_indices()
+                    STD = self.std_list[_iprb].loc[shank_channels]
+                    rel_noise_idx = np.nonzero(self.noise_list[_iprb][shank_channels])[0]
+                    itheta = ephys.estimate_theta_chan(STD, noise_idx=rel_noise_idx)
+                    iripple = ephys.estimate_ripple_chan(STD, noise_idx=rel_noise_idx)
+                    ihil = ephys.estimate_hil_chan(self.data_list[_iprb]['swr'][shank_channels, :],
+                                                   noise_idx=rel_noise_idx)
+                    llist = [shank_channels[ii] for ii in [itheta, iripple, ihil]]
+                    probe_shank_event_channels[_ishank] = llist
+            self.event_channel_list.append(probe_shank_event_channels)
         self.orig_event_channel_list = deepcopy(self.event_channel_list)
         
-        # # load AUX channel(s) if they exist
-        # self.aux_mx = np.array(())
-        # if os.path.exists(Path(ddir, 'AUX.npy')):
-        #     self.aux_mx = np.load(Path(ddir, 'AUX.npy'))
-        
         # select initial probe data
-        self.load_probe_data(self.iprb)
+        self.load_probe_data(iprb, ishank)
 
 
-    def load_probe_data(self, iprb):
+    def load_probe_data(self, iprb, ishank):
         """ Set data corresponding to the given probe """
         self.iprb = iprb
         self.probe = self.probe_list[iprb]
@@ -2152,31 +2226,56 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         self.SWR_THRES, self.DS_THRES = dict(self.threshold_list[iprb]).values()
         self.STD = pd.DataFrame(self.std_list[iprb])
         self.NOISE_TRAIN = np.array(self.noise_list[iprb])
-        self.channels = np.arange(self.DATA['raw'].shape[0])
         self.seizures, _, _ = ephys.load_iis(self.ddir, iprb)
-        self.event_channels = list(self.event_channel_list[iprb])
+        
+        # NEWSHANK
+        self.probe_shanks = self.probe_shank_list[iprb]
+        self.probe_event_channels = list(self.event_channel_list[iprb]) # [[theta_shank0,ripple_shank0,hil_shank0], [theta_shank1...]]
+        self.load_shank_data(ishank)
+        ##############
+    
+    def load_shank_data(self, ishank):
+        # NEWSHANK
+        self.ishank = ishank
+        self.shank = self.probe_shanks[ishank]
+        # load event channels for current shank
+        self.event_channels = list(self.probe_event_channels[ishank])
         self.theta_chan, self.ripple_chan, self.hil_chan = self.event_channels
-        self.orig_theta_chan, self.orig_ripple_chan, self.orig_hil_chan = self.orig_event_channel_list[iprb]
-    
-    
+        self.orig_theta_chan, self.orig_ripple_chan, self.orig_hil_chan = self.orig_event_channel_list[self.iprb][ishank]
+        
     def SWITCH_THE_PROBE(self, idx):
         # save dataframe with added/removed events
         self.swr_list[self.iprb] = pd.DataFrame(self.main_fig.SWR_ALL)
         self.ds_list[self.iprb]  = pd.DataFrame(self.main_fig.DS_ALL)
         
-        self.load_probe_data(idx)
-        
-        kwargs = dict(probe=self.probe, DATA=self.DATA, event_channels=self.event_channels, 
+        # NEWSHANK: probe=self.probe --> shank=self.shank
+        self.load_probe_data(idx, ishank=0)
+        kwargs = dict(shank=self.shank, DATA=self.DATA, event_channels=self.event_channels, 
                       DS_ALL=self.DS_ALL, SWR_ALL=self.SWR_ALL, STD=self.STD, 
                       NOISE_TRAIN=self.NOISE_TRAIN, seizures=self.seizures, SWR_THRES=self.SWR_THRES)
         self.main_fig.switch_the_probe(**kwargs)
+        
+        self.widget.init_shanks(self.probe_shanks, self.ishank)
+        ##############
+        
         self.widget.set_channel_values(*self.event_channels)
         self.widget.set_noise_channels(self.NOISE_TRAIN)
         self.widget.tab_widget.setTabVisible(2, len(self.seizures) > 0)
+        
+        
+    def SWITCH_THE_SHANK(self, idx):
+        # NEWSHANK
+        self.load_shank_data(idx)
+        self.main_fig.switch_the_shank(shank=self.shank, event_channels=self.event_channels)
+        
+        self.widget.set_event_range(self.shank.get_indices())
+        self.widget.set_channel_values(*self.event_channels)
+    
     
     def init_figs(self):
         """ Create main figure, initiate event channel update """
-        kwargs = dict(probe=self.probe, DATA=self.DATA, lfp_time=self.lfp_time, lfp_fs=self.lfp_fs, 
+        # NEWSHANK: probe=self.probe --> shank=self.shank
+        kwargs = dict(shank=self.shank, DATA=self.DATA, lfp_time=self.lfp_time, lfp_fs=self.lfp_fs, 
                       PARAMS=self.PARAMS, event_channels=self.event_channels, 
                       DS_ALL=self.DS_ALL, SWR_ALL=self.SWR_ALL, STD=self.STD, 
                       NOISE_TRAIN=self.NOISE_TRAIN, seizures=self.seizures, SWR_THRES=self.SWR_THRES,
@@ -2191,7 +2290,7 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
     def gen_layout(self):
         """ Set up layout """
         # create channel selection widget, initialize values
-        self.widget = ChannelSelectionWidget(self.ddir, self.NCH, self.NTS, self.lfp_time, self.lfp_fs, self.event_channels)
+        self.widget = ChannelSelectionWidget(self.ddir, self.NTS, self.lfp_time, self.lfp_fs, self.event_channels)
         self.widget.setStyleSheet('QWidget:focus {outline : none;}')
         self.widget.setMaximumWidth(250)
         has_szr = bool(len(self.seizures) > 0)
@@ -2205,6 +2304,12 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         self.widget.probes_qlist.setCurrentRow(self.iprb)
         row_height = self.widget.probes_qlist.sizeHintForRow(0)
         self.widget.probes_qlist.setMaximumHeight(row_height * 2 + 5)
+        
+        # NEWSHANK
+        # update shank list in settings widget
+        self.widget.shanks_qlist.setMaximumHeight(row_height * 2 + 5)
+        self.widget.init_shanks(self.probe_shanks, self.ishank)
+        
         # update noise channel list in settings widget
         self.widget.set_noise_channels(self.NOISE_TRAIN)
         
@@ -2219,8 +2324,8 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         
         
     def connect_signals(self):
-        # SWITCH_THE_PROBE
         self.widget.probes_qlist.currentRowChanged.connect(self.SWITCH_THE_PROBE)
+        self.widget.shanks_qlist.currentRowChanged.connect(self.SWITCH_THE_SHANK) # NEWSHANK
         # updated event channel inputs
         for item in self.widget.ch_inputs:
             item.valueChanged.connect(self.widget.emit_ch_signal)
@@ -2320,7 +2425,9 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         """ Pass updated event channels from settings widget to figure """
         self.main_fig.channel_changed(a,b,c)
         self.event_channels = self.main_fig.event_channels
-        self.event_channel_list[self.iprb] = list(self.event_channels)
+        # NEWSHANK
+        self.probe_event_channels[self.ishank] = list(self.event_channels)
+        self.event_channel_list[self.iprb] = list(self.probe_event_channels)
         
         
     def reset_ch(self, k):
@@ -2335,19 +2442,24 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         
     def view_swr(self):
         """ Launch ripple analysis popup """
-        self.ripple_chan = self.widget.swr_input.value()
-        self.swr_fig = IFigSWR(self.ripple_chan, self.SWR_ALL, self.DATA, #self.DATA['swr'], 
-                               self.lfp_time, self.lfp_fs, PARAMS=self.PARAMS, 
-                               NOISE_TRAIN=self.NOISE_TRAIN, thresholds=self.SWR_THRES[self.ripple_chan])
+        RIPPLE_CHAN = self.widget.swr_input.value()
+        shank_channels = np.array(self.shank.get_indices())
+        irows = np.nonzero(np.in1d(self.SWR_ALL.ch, shank_channels))[0]
+        SWR_ALL = self.SWR_ALL.iloc[irows, :]
+        DATA = {k:d[shank_channels, :] for k,d in self.DATA.items()}
+        # initialize figure
+        kwargs = dict(ch=RIPPLE_CHAN, channels=shank_channels, DF_ALL=SWR_ALL, DATA=DATA, lfp_time=self.lfp_time,
+                      lfp_fs=self.lfp_fs, PARAMS=self.PARAMS, EVENT_NOISE_TRAIN=self.NOISE_TRAIN[shank_channels],
+                      thresholds=self.SWR_THRES[RIPPLE_CHAN])
+        self.swr_fig = IFigSWR(**kwargs)
         sns.despine(self.swr_fig.fig)
-        
-        self.swr_popup = EventViewPopup(self.ripple_chan, self.channels, self.SWR_ALL, self.swr_fig, parent=self)
-        self.swr_popup.setWindowTitle(f'Sharp-wave ripples on channel {self.ripple_chan}')
-        # add SWR thresholds to event view widget
+        # initialize popup
+        self.swr_popup = EventViewPopup(ch=RIPPLE_CHAN, channels=shank_channels, DF_ALL=SWR_ALL, fig=self.swr_fig, parent=self)
+        self.swr_popup.setWindowTitle(f'Sharp-wave ripples on channel {RIPPLE_CHAN}')
         self.swr_popup.evw.add_view_btns(['Min. height', 'Min. width'], 'threshold')
         self.swr_popup.evw.add_view_btns(['Ripple envelope', 'Ripple duration'], 'feature')
         # set slider states, initialize plot
-        n = int(self.swr_fig.DF_MEAN.loc[self.ripple_chan].n_valid/2)
+        n = int(self.swr_fig.DF_MEAN.loc[RIPPLE_CHAN].n_valid/2)
         self.swr_fig.iw.idx.set_val(n)
         self.swr_fig.iw.idx.set_active(False)
         self.swr_fig.iw.idx.enable(False)
@@ -2363,18 +2475,24 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
     
     def view_ds(self):
         """ Launch DS analysis popup """
-        self.hil_chan = self.widget.hil_input.value()
-        
-        self.ds_fig = IFigDS(self.hil_chan, self.DS_ALL, self.DATA,
-                             self.lfp_time, self.lfp_fs, PARAMS=self.PARAMS, 
-                             NOISE_TRAIN=self.NOISE_TRAIN, thresholds=self.DS_THRES[self.hil_chan])
+        # NEWSHANK
+        HIL_CHAN = self.widget.hil_input.value()
+        shank_channels = np.array(self.shank.get_indices())
+        irows = np.nonzero(np.in1d(self.DS_ALL.ch, shank_channels))[0]
+        DS_ALL = self.DS_ALL.iloc[irows, :]
+        DATA = {k:d[shank_channels, :] for k,d in self.DATA.items()}
+        # initialize figure
+        kwargs = dict(ch=HIL_CHAN, channels=shank_channels, DF_ALL=DS_ALL, DATA=DATA, lfp_time=self.lfp_time,
+                      lfp_fs=self.lfp_fs, PARAMS=self.PARAMS, EVENT_NOISE_TRAIN=self.NOISE_TRAIN[shank_channels],
+                      thresholds=self.DS_THRES[HIL_CHAN])
+        self.ds_fig = IFigDS(**kwargs)
         sns.despine(self.ds_fig.fig)
-        
-        self.ds_popup = EventViewPopup(self.hil_chan, self.channels, self.DS_ALL, self.ds_fig, parent=self)
-        self.ds_popup.setWindowTitle(f'Dentate spikes on channel {self.hil_chan}')
+        # initialize popup
+        self.ds_popup = EventViewPopup(ch=HIL_CHAN, channels=shank_channels, DF_ALL=DS_ALL, fig=self.ds_fig, parent=self)
+        self.ds_popup.setWindowTitle(f'Dentate spikes on channel {HIL_CHAN}')
         self.ds_popup.evw.add_view_btns(['Half-width', 'Half-prom. height'], 'feature')
         # set slider states, initialize plot
-        n = int(self.ds_fig.DF_MEAN.loc[self.hil_chan].n_valid/2)
+        n = int(self.ds_fig.DF_MEAN.loc[HIL_CHAN].n_valid/2)
         self.ds_fig.iw.idx.set_val(n)
         self.ds_fig.iw.idx.set_active(False)
         self.ds_fig.iw.idx.enable(False)
@@ -2390,15 +2508,12 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
     
     def save_channels(self):
         """ Save event channels to .npy file """
-        #ffindme
-            
         # save dataframes listed by probe
         self.swr_list[self.iprb] = pd.DataFrame(self.main_fig.SWR_ALL)
         self.ds_list[self.iprb]  = pd.DataFrame(self.main_fig.DS_ALL)
         # update to match current file
         self.swr_list_file[self.iprb] = pd.DataFrame(self.main_fig.SWR_ALL)
         self.ds_list_file[self.iprb] = pd.DataFrame(self.main_fig.DS_ALL)
-        
         # load ALL_DS and ALL_SWR event dataframes, update with current probe
         ALL_SWR = pd.concat(self.swr_list_file, keys=range(len(self.swr_list_file)), ignore_index=False)
         ALL_DS = pd.concat(self.ds_list_file, keys=range(len(self.ds_list_file)), ignore_index=False)
@@ -2407,20 +2522,52 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         ALL_SWR.to_csv(Path(self.ddir, 'ALL_SWR'), index_label=False)
         ALL_DS.to_csv(Path(self.ddir, 'ALL_DS'), index_label=False)
         
+        # get event channel list for current probe/shank
+        event_channels = list(self.event_channel_list[self.iprb][self.ishank]) # 3 event channels for current shank
+        self.event_channel_list_file[self.iprb][self.ishank] = event_channels  # update list to match file
+        probe_event_channels = list(self.event_channel_list_file[self.iprb])   # save with other shanks in probe
+        np.save(Path(self.ddir, f'theta_ripple_hil_chan_{self.iprb}.npy'), 
+                np.array(probe_event_channels, dtype='object'))
+        
         # save event DFs for current probe
         self.DS_ALL = pd.DataFrame(self.ds_list[self.iprb])
         self.SWR_ALL = pd.DataFrame(self.swr_list[self.iprb])
         
-        # save specific event DFs for current probe
-        theta_chan, ripple_chan, hil_chan = self.event_channel_list[self.iprb]
-        DS_DF  = pd.DataFrame(self.DS_ALL.loc[hil_chan])
-        SWR_DF = pd.DataFrame(self.SWR_ALL.loc[ripple_chan])
+        # concatenate event dataframes for each shank in a probe
+        PROBE_DS_ALL = pd.DataFrame()
+        PROBE_SWR_ALL = pd.DataFrame()
+        for ishk,llist in enumerate(probe_event_channels):
+            if len(llist)==0:
+                continue
+            _, ripple_chan, hil_chan = llist
+            if hil_chan in self.DS_ALL.ch:
+                DS_DF = pd.DataFrame(self.DS_ALL.loc[hil_chan])
+                DS_DF['shank'] = ishk
+                PROBE_DS_ALL = pd.concat([PROBE_DS_ALL, DS_DF], axis=0, ignore_index=True)
+            if ripple_chan in self.SWR_ALL.ch:
+                SWR_DF = pd.DataFrame(self.SWR_ALL.loc[ripple_chan])
+                SWR_DF['shank'] = ishk
+                PROBE_SWR_ALL = pd.concat([PROBE_SWR_ALL, SWR_DF], axis=0, ignore_index=True)
+        PROBE_DS_ALL.to_csv(Path(self.ddir, f'DS_DF_{self.iprb}'), index_label=False)
+        PROBE_SWR_ALL.to_csv(Path(self.ddir, f'SWR_DF_{self.iprb}'), index_label=False)
         
-        SWR_DF.to_csv(Path(self.ddir, f'SWR_DF_{self.iprb}'), index_label=False)
-        DS_DF.to_csv(Path(self.ddir, f'DS_DF_{self.iprb}'), index_label=False)
+        # save specific event DFs for current probe and shank
+        #event_channels = [theta_chan, ripple_chan, hil_chan] = self.event_channel_list[self.iprb][self.ishank] # NEWSHANK
+        # if hil_chan in self.DS_ALL.ch:
+        #     DS_DF = pd.DataFrame(self.DS_ALL.loc[hil_chan])
+        # else: 
+        #     DS_DF = pd.DataFrame(columns=self.DS_ALL.columns)
+        # if ripple_chan in self.SWR_ALL.ch: 
+        #     SWR_DF = pd.DataFrame(self.SWR_ALL.loc[ripple_chan])
+        # else: 
+        #     SWR_DF = pd.DataFrame(columns=self.SWR_ALL.columns)
+        # SWR_DF.to_csv(Path(self.ddir, f'SWR_DF_probe{self.iprb}_shank{self.ishank}'), index_label=False)
+        # DS_DF.to_csv(Path(self.ddir, f'DS_DF_probe{self.iprb}_shank{self.ishank}'), index_label=False)
         
-        # save event channels and noise annotation for current probe
-        np.save(Path(self.ddir, f'theta_ripple_hil_chan_{self.iprb}.npy'), self.event_channels)
+        # # save event channels for current probe and shank
+        # np.save(Path(self.ddir, f'theta_ripple_hil_chan_probe{self.iprb}_shank{self.ishank}.npy'), event_channels)
+        
+        # save noise annotation for current probe
         np.save(Path(self.ddir, 'noise_channels.npy'), self.noise_list)
         
         # pop-up messagebox appears when save is complete
@@ -2453,19 +2600,15 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
     
     def debug(self):
         pdb.set_trace()
-        
 
 
 if __name__ == '__main__':
-    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/saved_data/JG007_nosort'
-    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/shank3_saved/JG035_het'
-    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/shank3_saved/JG032_het'
-    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/saved_data/jh201_stanford'
-    ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/stanford/JF513_saved'
-    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/stanford/JF512_new'
-    ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/saved_data/neuralynx_saved'
-    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/stanford/deepak_saved2'
-    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/saved_data/Chucky10mW'
+    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/5XFAD_raw/JG068_3/processed_data_15s/'
+    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/5XFAD_raw/multishank/processed_data_2probe'
+    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/5XFAD_raw/multishank/processed_data_dev_idx'
+    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/5XFAD_raw/multishank/processed_data_probe0_3shank_probe1_2shank'
+    ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/5XFAD_raw/multishank/processed_data_alternating'
+    
     pyfx.qapp()
     #w = hippos()
     probe_group = prif.read_probeinterface(Path(ddir, 'probe_group'))
@@ -2476,3 +2619,5 @@ if __name__ == '__main__':
     w.show()
     w.raise_()
     w.exec()
+
+        
