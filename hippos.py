@@ -33,8 +33,20 @@ class hippos(QtWidgets.QMainWindow):
         if not os.path.exists('default_folders.txt'):
             ephys.init_default_folders()
         ephys.clean_base_dirs()
+        data_path, probe_path, probe_file, param_file = ephys.base_dirs()
+        self.init_raw_ddir = str(data_path)
+        self.init_processed_ddir = str(data_path)
         
         self.gen_layout()
+        
+        self.basedirs_popup   = None
+        self.parameters_popup = None
+        self.probe_popup      = None
+        self.rawdata_popup    = None
+        self.analysis_popup   = None
+        self.ch_selection_dlg = None
+        self.classify_ds_dlg  = None
+        
         self.show()
         self.center_window()
         
@@ -82,11 +94,6 @@ class hippos(QtWidgets.QMainWindow):
                        '}'
                        )
         
-        # create popup window for processed data
-        self.analysis_popup = sp.ProcessedDirectorySelectionPopup(go_to_last=False, parent=self)
-        self.analysis_popup.ab.option1_btn.clicked.connect(self.ch_selection_popup)
-        self.analysis_popup.ab.option2_btn.clicked.connect(self.classify_ds_popup)
-        
         # create main buttons
         self.base_folder_btn = QtWidgets.QPushButton('Base folders')
         self.base_folder_btn.setStyleSheet(mode_btn_ss)
@@ -100,11 +107,11 @@ class hippos(QtWidgets.QMainWindow):
         self.analyze_btn.setStyleSheet(mode_btn_ss)
         
         # connect to functions
+        self.base_folder_btn.clicked.connect(self.base_folder_popup)
+        self.view_params_btn.clicked.connect(self.view_param_popup)
+        self.probe_btn.clicked.connect(self.probe_popup)
         self.process_btn.clicked.connect(self.raw_data_popup)
         self.analyze_btn.clicked.connect(self.processed_data_popup)
-        self.probe_btn.clicked.connect(self.probe_popup)
-        self.view_params_btn.clicked.connect(self.view_param_popup)
-        self.base_folder_btn.clicked.connect(self.base_folder_popup)
         
         self.centralLayout.addWidget(self.base_folder_btn)
         self.centralLayout.addWidget(self.view_params_btn)
@@ -116,70 +123,77 @@ class hippos(QtWidgets.QMainWindow):
     
     def base_folder_popup(self):
         """ View or change base data directories """
-        sp.BaseFolderPopup.run(parent=self)
+        self.basedirs_popup = sp.BaseFolderPopup()
+        self.basedirs_popup.setModal(True)
+        self.basedirs_popup.show()
     
     def view_param_popup(self):
         """ View/edit default parameters """
-        PARAMS = ephys.read_params()
-        self.param_dlg = gi.ParamSettings(PARAMS, parent=self)
-        self.param_dlg.show()
-        self.param_dlg.raise_()
-        res = self.param_dlg.exec()
-        if res:  # existing param file updated by user
-            a, b, c, param_path = ephys.base_dirs()
-            save_path = str(self.param_dlg.SAVE_LOCATION)
-            if param_path != save_path:
-                fname = os.path.basename(save_path)
-                res2 = QtWidgets.QMessageBox.question(self, '', f'Use {fname} as default parameter file?')
-                if res2 == QtWidgets.QMessageBox.Yes:
-                    llist = [a,b,c,save_path]
-                    ephys.write_base_dirs(llist)
+        self.parameters_popup = gi.ParamSettings()
+        self.parameters_popup.setModal(True)
+        res = self.parameters_popup.exec()
+        if res and (self.parameters_popup.SAVE_LOCATION != ephys.base_dirs()[3]):
+            save_path = str(self.parameters_popup.SAVE_LOCATION)
+            res2 = QtWidgets.QMessageBox.question(None, '', (f'Use {os.path.basename(save_path)} '
+                                                             'as default parameter file?'))
+            if res2:
+                ephys.write_base_dirs(ephys.base_dirs()[0:3] + [save_path])
         
-    def probe_popup(self):
+    def probe_popup(self, *args, init_probe=None):
         """ Build probe objects """
-        _ = probegod.run_probe_window(accept_visible=False, title='Create probe', parent=self)
+        self.probeobj_popup = sp.ProbeObjectPopup(probe=init_probe)
+        self.probeobj_popup.setModal(True)
+        self.probeobj_popup.show()
         
-    def raw_data_popup(self, mode=2, init_raw_ddir=''):
+    def raw_data_popup(self, *args, mode=2, init_raw_ddir=''):
         """ Select raw data for processing """
-        popup = sp.RawDirectorySelectionPopup(mode, init_raw_ddir, parent=self)
-        res = popup.exec()
-        if not res:
-            return
+        self.rawdata_popup = sp.RawDirectorySelectionPopup(raw_ddir=init_raw_ddir)
+        self.rawdata_popup.setModal(True)
+        self.rawdata_popup.show()
         
-    def processed_data_popup(self, _, init_ddir=None, go_to_last=True):
+    def processed_data_popup(self, *args, init_ddir=''):
         """ Show processed data options """
+        # create popup window for processed data
+        self.analysis_popup = sp.ProcessedDirectorySelectionPopup(init_ddir=init_ddir)
+        #self.analysis_popup.setModal(True)
+        self.analysis_popup.ab.option1_btn.clicked.connect(self.ch_selection_popup)
+        self.analysis_popup.ab.option2_btn.clicked.connect(self.classify_ds_popup)
         self.analysis_popup.show()
-        self.analysis_popup.raise_()
-        
+    
     def ch_selection_popup(self):
-        """ Launch event channel selection window """
+        # beta
         ddir = self.analysis_popup.ddir
         probe_list = self.analysis_popup.probe_group.probes
         iprb = self.analysis_popup.probe_idx
+        ishank = self.analysis_popup.shank_idx
         self.ch_selection_dlg = ChannelSelectionWindow(ddir, probe_list=probe_list, 
-                                                       iprb=iprb, parent=self.analysis_popup)
+                                                       iprb=iprb, ishank=ishank)
+        self.ch_selection_dlg.setModal(True)
         self.ch_selection_dlg.show()
         self.ch_selection_dlg.raise_()
         _ = self.ch_selection_dlg.exec()
         # check for updated files, enable/disable analysis options
         iprb = int(self.ch_selection_dlg.iprb)
-        self.analysis_popup.ab.ddir_toggled(ddir, iprb)
+        ishank = int(self.ch_selection_dlg.ishank)
+        self.analysis_popup.ab.ddir_toggled(ddir, probe_idx=iprb, shank_idx=ishank)
     
     def classify_ds_popup(self):
         """ Launch DS analysis window """
         ddir = self.analysis_popup.ddir
         iprb = self.analysis_popup.probe_idx
-        DS_DF = pd.read_csv(Path(ddir, f'DS_DF_{iprb}'))
+        ishank = self.analysis_popup.shank_idx
+        # load DS dataframe
+        DS_DF = ephys.load_ds_dataset(ddir, iprb, ishank=ishank)
         if DS_DF.empty:
             QtWidgets.QMessageBox.critical(self.analysis_popup, '', 'No dentate spikes detected on the hilus channel.')
             return
-        PARAMS = ephys.load_recording_params(ddir)
-        self.classify_ds_dlg = DS_CSDWindow(ddir, iprb, PARAMS, parent=self.analysis_popup)
+        self.classify_ds_dlg = DS_CSDWindow(ddir, iprb=iprb, ishank=ishank)
+        self.classify_ds_dlg.setModal(True)
         self.classify_ds_dlg.show()
         self.classify_ds_dlg.raise_()
         _ = self.classify_ds_dlg.exec()
         # check for updated files, enable/disable analysis options
-        self.analysis_popup.ab.ddir_toggled(ddir)
+        self.analysis_popup.ab.ddir_toggled(ddir, probe_idx=iprb, shank_idx=ishank)
         
     def center_window(self):
         """ Move GUI to center of screen """
@@ -189,8 +203,10 @@ class hippos(QtWidgets.QMainWindow):
         self.move(qrect.topLeft())
 
 if __name__ == '__main__':
-    app = pyfx.qapp()
+    app = QtWidgets.QApplication(sys.argv)
+    app.setStyle('Fusion')
+    app.setQuitOnLastWindowClosed(True)
+    
     w = hippos()
-    w.show()
     w.raise_()
     sys.exit(app.exec())
