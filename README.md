@@ -5,68 +5,43 @@
 * Miniconda: https://docs.anaconda.com/miniconda/miniconda-install/
 * Anaconda Navigator: https://www.anaconda.com/download
   * Navigator provides a GUI and a large suite of packages/applications, but takes up much more disk space
-  
-2) Open Anaconda Prompt terminal window
-  
-3) Allow package installations from conda-forge channel
+
+2) Download the Toothy ZIP file from GitHub and move the folder to the desired location
+
+3) Open an Anaconda Prompt terminal window and set the current directory to the Toothy folder
 ```
-conda config -–add channels conda-forge
-conda config –set channel_priority strict
+cd [PATH_TO_TOOTHY_FOLDER]
+```
+* e.g. ```cd C:\Users\Amanda Schott\Documents\Data\Toothy-main```
+
+6) Create a new Anaconda environment for the Toothy application using the provided ```environment.yml``` file, then activate your new environment
+```
+conda env create -f environment.yml
+conda activate toothy_gui_env
 ```
 
-4) Set the current directory to the location where you want to download the code folder
+7) Run the application!
 ```
-cd [PATH_TO_PARENT_FOLDER]
-```
-* e.g. ```cd C:\Users\Amanda Schott\Documents\Data```
-
-5) Install ```git``` package, clone the GitHub repository to a new folder on your computer, then set the current directory to the new folder with all the code files
-```
-conda install git
-git clone https://github.com/Farrell-Laboratory/Toothy [FOLDER_NAME]
-cd [FOLDER_NAME]
-
-Alternatively, you can download the .zip file manually from GitHub.
+python toothy.py
 ```
 
-6) Create a new Anaconda environment running Python 3.9 for the Toothy application, then activate your new environment
-```
-conda create -n <myenv> python=3.9
-conda activate <myenv>
-```
+## Getting Started
 
-7) Run the following lines (one at a time) to install the necessary packages in your new Anaconda environment
-   * Note that ```conda install``` is used when possible, ```pip install``` is used otherwise
-```
-pip install neo==0.13.1
-conda install numpy=1.26.0
-conda install pandas=2.1.1
-conda install matplotlib=3.8.0
-conda install scipy=1.11.4
-conda install seaborn=0.13.0
-pip install ipython==8.12.3
-conda install scikit-learn=1.2.2
-conda install pyqt=5.15.10
-pip install open-ephys-python-tools==0.1.10
-conda install probeinterface=0.2.23
-```
+#### Set your "Base Folders"
+The "Base Folders" window allows you to set default folders and files for data analysis.
 
-8) Run the ```import_packages.py``` file to ensure that all required packages are installed
-```
-python import_packages.py
-```
-* If you encounter a ```ModuleNotFoundError```, perform the following steps:
-  * Try installing the missing module using conda
-    * ```conda install [MODULE_NAME]```
-  * If the above results in a ```PackagesNotFoundError```, install the module using ```pip```
-    * ```pip install [MODULE_NAME]```
-  * In most cases, ```MODULE_NAME``` will be the same as the package name in the error message. However, the following exceptions apply:
-    * Module ```sklearn``` must be installed as ```scikit-learn```
-    * Module ```PyQt5``` must be installed as ```pyqt```
-    * Module ```open_ephys``` must be installed as ```open-ephys-python-tools```
-* Repeat the above steps until ```import_packages.py``` runs successfully
+1) Raw Data
+* Select the directory where your raw data files are stored. The default location is the Toothy folder itself; updating this location is optional but convenient for selecting raw recording data for initial processing.
 
-9) Run the application!
-```
-python hippos.py
-```
+3) Probe Files
+* Select the directory where your probe configuration files will be stored. The application automatically creates a ```probe_configs``` directory within the Toothy folder and creates a ```demo_probe_config.json``` file as an example probe object.
+
+4) Default Probe
+* If your recordings tend to use the same probe, you can optionally select a default probe configuration file that will be automatically loaded during the data processing phase.
+
+5) Default Parameters
+* Select the TXT file containing the parameter values that you want to use for data processing. The application automatically generates a ```default_params.txt``` file with reasonable initial values, which can be changed in the next step. 
+
+
+#### Set your analysis parameters
+The "Parameters" window allows you to view and edit the parameters used for data processing and analysis, which are stored in the TXT file specified in the previous step. You can display a short description of each parameter by hovering over its label, and changes can be saved either to the current parameter file or as a new TXT file.
