@@ -40,4 +40,8 @@ The "Base Folders" window allows you to set default folders and files for data a
 * If your recordings tend to use the same probe, you can optionally select a default probe configuration file that will be automatically loaded during the data processing phase.
 
 5) Default Parameters
-* Select the .txt file containing the parameter values that you want to use for data processing. The application automatically generates a ```default_params.txt``` file with reasonable initial values, which can be changed in the next step.
+* Select the TXT file containing the parameter values that you want to use for data processing. The application automatically generates a ```default_params.txt``` file with reasonable initial values, which can be changed in the next step. 
+
+
+#### Set your analysis parameters
+The "Parameters" window allows you to view and edit the parameters used for data processing and analysis, which are stored in the TXT file specified in the previous step. You can display a short description of each parameter by hovering over its label, and changes can be saved either to the current parameter file or as a new TXT file.
