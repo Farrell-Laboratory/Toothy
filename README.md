@@ -24,3 +24,20 @@ conda activate toothy_gui_env
 ```
 python toothy.py
 ```
+
+## Getting Started
+
+#### Set your "Base Folders"
+The "Base Folders" window allows you to set default folders and files for data analysis.
+
+1) Raw Data
+* Select the directory where your raw data files are stored. The default location is the Toothy folder itself; updating this location is optional but convenient for selecting raw recording data for initial processing.
+
+3) Probe Files
+* Select the directory where your probe configuration files will be stored. The application automatically creates a ```probe_configs``` directory within the Toothy folder and creates a ```demo_probe_config.json``` file as an example probe object.
+
+4) Default Probe
+* If your recordings tend to use the same probe, you can optionally select a default probe configuration file that will be automatically loaded during the data processing phase.
+
+5) Default Parameters
+* Select the .txt file containing the parameter values that you want to use for data processing. The application automatically generates a ```default_params.txt``` file with reasonable initial values, which can be changed in the next step.
