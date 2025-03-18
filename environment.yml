@@ -1,0 +1,17 @@
+name: toothy_gui_env
+dependencies:
+  - python=3.9
+  - numpy=1.26.0
+  - pandas=2.1.1
+  - matplotlib=3.8.0
+  - scipy=1.11.4
+  - scikit-learn=1.2.2
+  - pyqt=5.15.10
+  - pip
+  - pip:
+    - neo==0.13.1
+    - seaborn==0.13.0
+    - ipython==8.12.3
+    - open-ephys-python-tools==0.1.10
+    - probeinterface==0.2.23
+
