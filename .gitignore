@@ -2,4 +2,4 @@
 /__pycache__
 default_folders.txt
 default_params.txt
-probe_configs/demo_probe_config.json
+/probe_configs
