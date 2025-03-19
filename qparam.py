@@ -66,9 +66,9 @@ def get_original_defaults():
     'nclusters' : 2.0,
     'eps' : 0.2,
     'min_clus_samples' : 3.0,
-    'el_w' : 15.0,
-    'el_h' : 15.0,
-    'el_shape' : 'circle'
+    'el_shape' : 'circle',
+    'el_area' : 225.0,
+    'el_h' : 12.5
     }
     
     return PARAMS
@@ -116,10 +116,10 @@ def get_param_info():
     'nclusters'        : ['# clusters', 'Number of target clusters; applies to K-means algorithm only.'],
     'eps'              : ['Epsilon (\u03B5)', 'Maximum distance between points in the same cluster; applies to DBSCAN algorithm only.'],
     'min_clus_samples' : ['Min. cluster samples', 'Minimum number of samples per cluster; applies to DBSCAN algorithm only.'],
-                          
-    'el_w'     : ['Contact width', 'Default width (\u00B5m) of probe electrode contacts.'],
-    'el_h'     : ['Contact height', 'Default height (\u00B5m) of probe electrode contacts.'],
-    'el_shape' : ['Contact shape', 'Default shape of probe electrode contacts.']
+    
+    'el_shape' : ['Contact shape', 'Default shape of probe electrode contacts.'],
+    'el_area'  : ['Contact area', 'Default area (\u00B5m\u00B2) of probe electrode contacts.'],
+    'el_h'     : ['Contact height', 'Default height (\u00B5m) of probe electrode contacts.']
     }
     
     return PARAM_INFO
@@ -214,9 +214,9 @@ def validate_params(ddict):
                   'nclusters' : is_number('nclusters'),
                   'eps' : is_number('eps'),
                   'min_clus_samples' : is_number('min_clus_samples'),
-                  'el_w' : is_number('el_w'),
-                  'el_h' : is_number('el_h'),
-                  'el_shape' : is_category('el_shape', ['circle', 'square', 'rectangle'])
+                  'el_shape' : is_category('el_shape', ['circle', 'square', 'rectangle']),
+                  'el_area' : is_number('el_area'),
+                  'el_h' : is_number('el_h')
                   }
     is_valid = bool(all(valid_ddict.values()))
     return is_valid, valid_ddict
@@ -415,10 +415,6 @@ class ParamObject(QtWidgets.QWidget):
         self.lfp_fs.setSuffix(' Hz')
         self.trange = SpinboxRange(key='trange', double=True, decimals=0, maximum=999999, suffix=' s')
         self.trange.box1.setMinimum(-1)
-        
-        #self.trange.box1.setSpecialValueText()
-        
-        
         kwargs = dict(double=True, decimals=1, step=0.5, maximum=999999, suffix=' Hz')
         self.theta = SpinboxRange(key='theta', **kwargs)
         self.slow_gamma = SpinboxRange(key='slow_gamma', **kwargs)
@@ -509,20 +505,20 @@ class ParamObject(QtWidgets.QWidget):
         self.min_clus_samples.setMinimum(1)
         self.min_clus_samples.setDecimals(0)
         ### probe_geometry
-        self.el_w = Spinbox(key='el_w')
-        self.el_w.setDecimals(1)
-        self.el_w.setSuffix(' \u00B5m')
+        self.el_shape = Combobox(key='el_shape')
+        self.el_shape.addItems(['Circle', 'Square', 'Rectangle'])
+        self.el_area = Spinbox(key='el_area')
+        self.el_area.setDecimals(1)
+        self.el_area.setSuffix(' \u00B5m\u00B2')
         self.el_h = Spinbox(key='el_h')
         self.el_h.setDecimals(1)
         self.el_h.setSuffix(' \u00B5m')
-        self.el_shape = Combobox(key='el_shape')
-        self.el_shape.addItems(['Circle', 'Square', 'Rectangle'])
         
         for sbox in [self.lfp_fs, self.ds_height_thr, self.ds_dist_thr, self.ds_prom_thr, self.ds_wlen, 
                      self.swr_ch_bound, self.swr_height_thr, self.swr_min_thr, self.swr_dist_thr, 
                      self.swr_min_dur, self.swr_freq_thr, self.swr_freq_win, self.swr_maxamp_win,
                      self.f_order, self.f_sigma, self.tol, self.src_diam, self.src_h, self.cond,
-                     self.cond_top, self.nclusters, self.eps, self.min_clus_samples, self.el_w, self.el_h]:
+                     self.cond_top, self.nclusters, self.eps, self.min_clus_samples, self.el_area, self.el_h]:
             sbox.setMaximum(999999)
             
         tups = [(self.lfp_fs, 'signal_processing'),
@@ -564,9 +560,9 @@ class ParamObject(QtWidgets.QWidget):
                 (self.eps, 'csd_clustering'),
                 (self.min_clus_samples, 'csd_clustering'),
                 
-                (self.el_w, 'probe_geometry'),
-                (self.el_h, 'probe_geometry'),
-                (self.el_shape, 'probe_geometry')]
+                (self.el_shape, 'probe_geometry'),
+                (self.el_area, 'probe_geometry'),
+                (self.el_h, 'probe_geometry')]
         
         # get widget items and corresponding modes, labels, and info text
         widgets,modes = map(list, zip(*tups))
@@ -617,12 +613,12 @@ class ParamObject(QtWidgets.QWidget):
             if item.isvalid == True:
                 ddict[key] = item.get_param_value()
             else:  # # if item remains invalid, export original param value
-                if key in self.DDICT_ORIG: ddict[key] = self.DDICT_ORIG[key]
+                if key in self.DDICT_ORIG: 
+                    ddict[key] = self.DDICT_ORIG[key]
                 invalid.append(key)
         return ddict, invalid
     
     def emit_signal(self, *args):
-        print(f'emit_signal; sender={self.sender().objectName()}')
         
         # A) user toggles widget -> that param is no longer invalid
         # B) user uploads a new set of params -> validity depends on the content
@@ -657,7 +653,6 @@ class ParamObject(QtWidgets.QWidget):
             item.set_widget_valid(True)
 
     def update_gui_from_ddict(self, ddict):#, block=False):
-        print('UPDATE_GUI_FROM_DDICT')
         self.DDICT_ORIG = dict(ddict)
         # check for valid $ddict values for each current param (e.g. lfp_fs:False, trange=True)
         valid_ddict = {k:b for k,b in validate_params(ddict)[1].items() if k in self.KEYS}

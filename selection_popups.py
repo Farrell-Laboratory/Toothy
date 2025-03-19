@@ -142,7 +142,7 @@ class DirectorySelectionWidget(QtWidgets.QWidget):
         self.ddir_lbl.setText(title)
         
         # yes/no icons
-        self.ddir_icon_btn = gi.StatusIcon(init_state=0)#QtWidgets.QPushButton()  # folder status icon
+        self.ddir_icon_btn = gi.StatusIcon(init_state=0) # folder status icon
         self.ddir_lbl_hbox.addWidget(self.ddir_icon_btn)
         self.ddir_lbl_hbox.addWidget(self.ddir_lbl)
         
@@ -182,23 +182,18 @@ class ProcessedDirectorySelectionPopup(QtWidgets.QDialog):
     def __init__(self, init_ddir='', go_to_last=False, parent=None):
         super().__init__(parent)
         self.probe_group = None
-        self.probe_idx = -1
         self.probe = None
+        self.probe_idx = -1
+        self.shank_idx = 0
         
-        if go_to_last == True:
-            qfd = QtWidgets.QFileDialog()
-            self.ddir = qfd.directory().path()
+        if init_ddir == '':
+            self.ddir = ephys.base_dirs()[0]
         else:
-            if init_ddir == '':
-                self.ddir = ephys.base_dirs()[0]
-            else:
-                self.ddir = init_ddir
-        
+            self.ddir = init_ddir
         self.gen_layout()
         
         if os.path.isdir(self.ddir):
             self.update_ddir(self.ddir)
-            
     
     def gen_layout(self):
         self.layout = QtWidgets.QVBoxLayout(self)
@@ -212,13 +207,17 @@ class ProcessedDirectorySelectionPopup(QtWidgets.QDialog):
         # basic directory selection widget
         self.ddw = DirectorySelectionWidget(title='<b><u>Processed Data Folder</u></b>')
         self.qedit_hbox = self.ddw.qedit_hbox
+        # dropdown lists of probes and shanks
         self.probe_dropdown = QtWidgets.QComboBox()
         self.probe_dropdown.hide()
+        self.shank_dropdown = QtWidgets.QComboBox()
+        self.shank_dropdown.hide()
         self.info_view_btn = QtWidgets.QPushButton('More Info')
         self.info_view_btn.setEnabled(False)
         self.info_view_btn.hide()
         self.ddw.grid.addWidget(self.probe_dropdown, 2, 0, 1, 3)
-        self.ddw.grid.addWidget(self.info_view_btn, 2, 3, 1, 3)
+        self.ddw.grid.addWidget(self.shank_dropdown, 2, 3, 1, 3)
+        #self.ddw.grid.addWidget(self.info_view_btn, 2, 3, 1, 3)
         ddir_vbox.addWidget(self.ddw)
         
         ###   ACTION BUTTONS
@@ -236,6 +235,7 @@ class ProcessedDirectorySelectionPopup(QtWidgets.QDialog):
         # connect buttons
         self.ddw.ddir_btn.clicked.connect(self.select_ddir)
         self.probe_dropdown.currentTextChanged.connect(self.update_probe)
+        self.shank_dropdown.currentTextChanged.connect(self.update_shank)
         self.info_view_btn.clicked.connect(self.show_info_popup)
     
     def show_info_popup(self):
@@ -255,12 +255,14 @@ class ProcessedDirectorySelectionPopup(QtWidgets.QDialog):
         self.ddir = ddir
         x = validate_processed_ddir(self.ddir)  # valid data folder?
         self.ddw.update_status(self.ddir, x)    # update folder path/icon style
-        # reset probe dropdown, populate with probes in $info
+        
+        # reset probe and shank dropdowns, populate with probes in $info
         self.probe_dropdown.blockSignals(True)
         for i in reversed(range(self.probe_dropdown.count())):
             self.probe_dropdown.removeItem(i)
         self.probe_dropdown.setVisible(x)
-        self.info_view_btn.setVisible(x)
+        self.shank_dropdown.setVisible(x)
+        #self.info_view_btn.setVisible(x)
         if x:
             # read in recording info, clear and update probe dropdown menu
             self.probe_group = prif.read_probeinterface(Path(self.ddir, 'probe_group'))
@@ -270,17 +272,43 @@ class ProcessedDirectorySelectionPopup(QtWidgets.QDialog):
             self.probe_group, self.probe, self.probe_idx = None, None, -1
         # probe index (e.g. 0,1,...) if directory is valid, otherwise -1
         self.probe_dropdown.blockSignals(False)
-        #self.current_probe = self.probe_dropdown.currentIndex()
         self.update_probe()
-    
     
     def update_probe(self):
         if self.probe_group is None: return
         self.probe_idx = self.probe_dropdown.currentIndex()
         self.probe = self.probe_group.probes[self.probe_idx]
-        self.ab.ddir_toggled(self.ddir, self.probe_idx)  # update action widgets
-        
+        # set shank dropdown items from current probe
+        self.shank_dropdown.blockSignals(True)
+        for j in reversed(range(self.shank_dropdown.count())):
+            self.shank_dropdown.removeItem(j)
+        items = [f'shank {i}' for i in range(self.probe.get_shank_count())]
+        self.shank_dropdown.addItems(items)
+        self.shank_dropdown.blockSignals(False)
+        self.update_shank()
     
+    def update_shank(self):
+        self.shank_idx = self.shank_dropdown.currentIndex() # update action widgets
+        self.ab.ddir_toggled(self.ddir, probe_idx=self.probe_idx, shank_idx=self.shank_idx)
+
+
+class ProbeObjectPopup(QtWidgets.QDialog):
+    def __init__(self, probe=None, auto_plot=True, parent=None):
+        super().__init__(parent)
+        
+        # initialize central widget
+        self.probegod = probegod(probe=probe, auto_plot=auto_plot)
+        self.accept_btn = self.probegod.accept_btn
+        self.accept_btn.setVisible(False)
+        self.accept_btn.clicked.connect(self.accept)
+        
+        self.layout = QtWidgets.QVBoxLayout(self)
+        self.layout.addWidget(self.probegod)
+        self.layout.setSizeConstraint(QtWidgets.QLayout.SetFixedSize)
+        self.layout.addWidget(self.accept_btn)
+        self.setWindowTitle('Create probe')
+    
+
 class ParamFilePopup(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -400,9 +428,6 @@ class BaseFolderPopup(QtWidgets.QDialog):
         # get base folder widgets, put code tags around font
         QtCore.QTimer.singleShot(10, self.center_window)
         
-        # fx2: x -> p,fx(*x) -> (p,w,_,_,z)
-        # fx: (k,v) -> (<k>,<v>) -> func() -> (w,x,y,z)
-        #fx2 = lambda x: (p, fx(k,p))
     def center_window(self):
         qrect = self.frameGeometry()  # proxy rectangle for window with frame
         screen_rect = pyfx.ScreenRect()
@@ -410,7 +435,7 @@ class BaseFolderPopup(QtWidgets.QDialog):
         self.move(qrect.topLeft())
     
     def choose_probe_file(self):
-        probe, fpath = gi.FileDialog.load_file(filetype='probe', parent=self,
+        probe, fpath = gi.FileDialog.load_file(filetype='probe',
                                                init_ddir=str(self.BASE_FOLDERS[1]))
         if probe is not None:
             self.BASE_FOLDERS[2] = str(fpath)
@@ -423,7 +448,7 @@ class BaseFolderPopup(QtWidgets.QDialog):
         self.save_btn.setEnabled(True)
             
     def choose_param_file(self):
-        param_dict, fpath = gi.FileDialog.load_file(filetype='param', parent=self)
+        param_dict, fpath = gi.FileDialog.load_file(filetype='param')
         if param_dict is not None:
             self.BASE_FOLDERS[3] = str(fpath)
             self.update_base_ddir(3)
@@ -442,7 +467,7 @@ class BaseFolderPopup(QtWidgets.QDialog):
         fmt = 'Base folder for %s'
         titles = [fmt % x for x in ['raw data', 'probe files']]
         # when activated, initialize at ddir and save new base folder at index i
-        dlg = gi.FileDialog(init_ddir=init_ddir, parent=self)
+        dlg = gi.FileDialog(init_ddir=init_ddir)
         dlg.setWindowTitle(titles[i])
         res = dlg.exec()
         if res:
@@ -766,14 +791,16 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         super().__init__(parent)
         self.setWindowTitle('Select a raw data source')
         
-        # load parameters
+        # load parameters, get initial directories
         self.PARAMS = ephys.read_params()
-        
-        # get initial directory for file dialog
         raw_base, probe_base, probe_file, _  = ephys.base_dirs()
-        qfd = QtWidgets.QFileDialog()
-        last_ddir = str(qfd.directory().path()) # most recently entered directory
-        self.raw_ddir = clean(mode, raw_base, last_ddir, str(raw_ddir))
+        
+        #qfd = QtWidgets.QFileDialog()
+        #last_ddir = str(qfd.directory().path()) # most recently entered directory
+        #self.raw_ddir = clean(mode, raw_base, last_ddir, str(raw_ddir))
+        if not (os.path.exists(raw_ddir) and os.path.isdir(raw_ddir)):
+            raw_ddir = str(raw_base)
+        self.raw_ddir = raw_ddir
         self.default_probe_file = probe_file
         
         self.gen_layout()
@@ -788,7 +815,7 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
     def gen_layout(self):
         self.layout = QtWidgets.QVBoxLayout(self)
         self.layout.setSpacing(5)
-        gbox_ss = 'QGroupBox {background-color : rgba(230,230,230,255);}'# border : 2px ridge gray; border-radius : 4px;}'
+        gbox_ss = 'QGroupBox {background-color : rgba(230,230,230,255);}'
         #self.layout.setSizeConstraint(QtWidgets.QLayout.SetFixedSize)
         
         ###   SELECT RAW DATA FOLDER
@@ -873,7 +900,8 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         
         ###   ASSIGN PROBE(S)
         self.probe_gbox = QtWidgets.QGroupBox()
-        self.probe_gbox.setStyleSheet('QGroupBox {border-width : 0px; font-weight : bold; text-decoration : underline;}')
+        self.probe_gbox.setStyleSheet('QGroupBox {border-width : 0px;'
+                                      'font-weight : bold; text-decoration : underline;}')
         self.probe_vbox = pyfx.InterWidgets(self.probe_gbox, 'v')[2]
         
         ###   ACTION BUTTONS
@@ -1015,13 +1043,13 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         for btn in [self.oe_radio, self.nn_radio, self.nl_radio, self.manual_radio]:
             btn.setStyleSheet('QRadioButton:disabled {color : gray;}')
         QtCore.QTimer.singleShot(10, self.center_window)
-    
+        
     def update_probe_config(self):
         x = bool(self.tort.tort_btn.isEnabled())
         self.tort.prb_icon_btn.new_status(x)
         self.tort_btn.setEnabled(bool(x and self.PARAMS is not None))
         
-    
+        
     def select_ddir(self):
         # open file popup to select raw data folder
         dlg = gi.FileDialog(init_ddir=self.raw_ddir, parent=self)
@@ -1274,7 +1302,7 @@ class tort(QtWidgets.QWidget):
     def connect_signals(self):
         """ Connect widgets to functions """
         self.load_prb.clicked.connect(self.load_probe_from_file)
-        self.create_prb.clicked.connect(self.design_probe)
+        self.create_prb.clicked.connect(self.design_probe) # ffindme
         self.view_assignments_btn.clicked.connect(self.view_data_assignments)
         self.block_radio.toggled.connect(self.switch_index_mode)
     
@@ -1381,20 +1409,15 @@ class tort(QtWidgets.QWidget):
     
     
     def design_probe(self):
-        """ Create """
-        my_probegod = probegod()
-        my_probegod.accept_btn.setVisible(True)
-        dlg = gi.Popup(widgets=[my_probegod], title='Create probe')
-        dlg.layout.setSizeConstraint(QtWidgets.QLayout.SetFixedSize)
-        my_probegod.accept_btn.clicked.connect(dlg.accept)
-        my_probegod.accept_btn.setText('CHOOSE PROBE')
-        dlg.layout.addWidget(my_probegod.accept_btn)
-        my_probegod.toggle_bgrp.buttonToggled.connect(lambda: QtCore.QTimer.singleShot(10, dlg.center_window))
-        res = dlg.exec()
+        probe_popup = ProbeObjectPopup()
+        probe_popup.setModal(True)
+        probe_popup.accept_btn.setVisible(True)
+        probe_popup.accept_btn.setText('CHOOSE PROBE')
+        res = probe_popup.exec()
         if res:
-            probe = my_probegod.probe
+            probe = probe_popup.probegod.probe
             self.add_probe_row(probe)
-    
+
     def check_assignments(self):
         """ Check for valid assignment upon probe addition/deletion/reindexing """
         # list probe(s) associated with each data row
@@ -1414,8 +1437,12 @@ class tort(QtWidgets.QWidget):
         is_valid = bool(nvalid == self.nrows)
         
         probe_strings = [', '.join(np.array(x, dtype=str)) for x in ALL_ROWS.values()]
-        self.data_assign_df = pd.DataFrame({'Row':ALL_ROWS.keys(), 
-                                            'Probe(s)':probe_strings})  # assignment dataframe
+        self.data_assign_df = pd.DataFrame({'Row':ALL_ROWS.keys(), # assignment dataframe
+                                            'Probe(s)':probe_strings})
         self.tort_btn.setEnabled(is_valid)  # require valid config for next step
         self.data_lbl.setText(self.data_txt_fmt % (['red','green'][int(is_valid)], nvalid))
         self.check_signal.emit()
+        
+        
+        
+        

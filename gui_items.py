@@ -558,7 +558,7 @@ class AnalysisBtns(QtWidgets.QWidget):
         return widget
         
     
-    def ddir_toggled(self, ddir, probe_idx=0):
+    def ddir_toggled(self, ddir, probe_idx=0, shank_idx=0):
         self.option1_widget.setEnabled(False)
         self.option2_widget.setEnabled(False)
         
@@ -571,7 +571,9 @@ class AnalysisBtns(QtWidgets.QWidget):
             self.option1_widget.setEnabled(True)  # req: basic LFP data
         
         # required: event channels file, DS_DF file for current probe
-        if f'DS_DF_{probe_idx}' in files and f'theta_ripple_hil_chan_{probe_idx}.npy' in files:
+        a = len(ephys.load_event_channels(ddir, probe_idx, ishank=shank_idx)) > 0
+        b = f'DS_DF_{probe_idx}' in files
+        if a and b:
             self.option2_widget.setEnabled(True)
             
 
@@ -1535,7 +1537,7 @@ class MsgboxParams(Msgbox):
         self.save_btn.clicked.connect(self.create_param_file)
     
     def choose_param_file(self):
-        params, fpath = FileDialog.load_file(filetype='param', parent=self)
+        params, fpath = FileDialog.load_file(filetype='param', init_fname='')
         if params is not None:
             print(f'params = {params}')
             self.PARAM_FILE = str(fpath)
@@ -1552,19 +1554,22 @@ class MsgboxParams(Msgbox):
         
         
 class ParamSettings(QtWidgets.QDialog):
-    
-    def __init__(self, ddict={}, parent=None):
+    SAVE_LOCATION = None
+    def __init__(self, ddict=None, parent=None):
         super().__init__(parent)
+        if ddict is None:
+            ddict = ephys.read_params()
         
         # initialize parameter input widget
-        self.main_widget = ParamObject(ddict)
-        self.PARAMS = self.main_widget.ddict_from_gui()
+        self.main_widget = qparam.ParamObject(ddict)
+        self.PARAMS, _ = self.main_widget.ddict_from_gui()
         self.PARAMS_ORIG = dict(self.PARAMS)
         
         self.gen_layout()
         self.connect_signals()
         
-        QtCore.QTimer.singleShot(50, lambda: self.qscroll.setMinimumWidth(int(self.main_widget.width())))
+        #self.qscroll.
+        #QtCore.QTimer.singleShot(50, lambda: self.qscroll.setMinimumWidth(int(self.main_widget.width())))
         
     def gen_layout(self):
         # embed main parameter widget in scroll area
@@ -1575,7 +1580,7 @@ class ParamSettings(QtWidgets.QDialog):
         self.qscroll.setWidget(self.main_widget)
         left_hash = QtWidgets.QLabel('#####')
         right_hash = QtWidgets.QLabel('#####')
-        title = QtWidgets.QLabel('Default Parameters')
+        title = QtWidgets.QLabel('Parameters')
         for lbl in [left_hash, right_hash, title]:
             lbl.setAlignment(QtCore.Qt.AlignCenter)
             lbl.setStyleSheet('QLabel {'
@@ -1597,10 +1602,8 @@ class ParamSettings(QtWidgets.QDialog):
         #self.save_btn.setEnabled(False)
         self.reset_btn = QtWidgets.QPushButton('Reset parameters')
         self.reset_btn.setEnabled(False)
-        self.close_btn = QtWidgets.QPushButton('Close')
         bbox.addWidget(self.save_btn)
         bbox.addWidget(self.reset_btn)
-        bbox.addWidget(self.close_btn)
         
         self.layout = QtWidgets.QVBoxLayout(self)
         #self.layout.setSpacing(20)
@@ -1613,7 +1616,6 @@ class ParamSettings(QtWidgets.QDialog):
         self.main_widget.update_signal.connect(self.update_slot)
         self.save_btn.clicked.connect(self.save_param_file)
         self.reset_btn.clicked.connect(self.reset_params)
-        self.close_btn.clicked.connect(self.reject)
     
     def update_slot(self, PARAMS):
         """ Update parameter dictionary based on user input """
@@ -1625,12 +1627,13 @@ class ParamSettings(QtWidgets.QDialog):
     def reset_params(self):
         """ Reset parameters to original values """
         self.main_widget.update_gui_from_ddict(self.PARAMS_ORIG)
+        #self.save_btn.setEnabled(False)
+        self.reset_btn.setEnabled(False)
     
     def save_param_file(self):
-        fpath = FileDialog.save_file(data_object=self.PARAMS, filetype='param', parent=self)
+        fpath = FileDialog.save_file(data_object=self.PARAMS, filetype='param', init_fname='default_params.txt')
         if fpath:
             self.SAVE_LOCATION = fpath
-            print('accept!')
             self.accept()
 
 
@@ -1651,6 +1654,7 @@ class FileDialog(QtWidgets.QFileDialog):
         is_param: load parameter dictionary from .txt file
         """
         super().__init__(parent)
+        self.setModal(True)
         self.load_or_save = load_or_save
         self.is_probe, self.is_array, self.is_param = is_probe, is_array, is_param
         self.allow_invalid_params = allow_invalid_params
@@ -2138,7 +2142,7 @@ class SpinnerWindow(QtWidgets.QWidget):
         self.spinner_label.setWordWrap(True)
         self.spinner_label.setStyleSheet('QLabel'
                                          '{'
-                                         'background-color : rgba(230,230,255,200);'
+                                         'background-color : rgba(230,230,255,220);'
                                          'border : 2px double darkblue;'
                                          'border-radius : 8px;'
                                          'color : darkblue;'
@@ -2176,3 +2180,17 @@ class SpinnerWindow(QtWidgets.QWidget):
     @QtCore.pyqtSlot(str)
     def report_progress_string(self, txt):
         self.spinner_label.setText(txt)
+
+
+if __name__ == '__main__':
+    app = QtWidgets.QApplication(sys.argv)
+    app.setStyle('Fusion')
+    app.setQuitOnLastWindowClosed(True)
+    
+    w = ParamSettings()
+    w.show()
+    w.raise_()
+    sys.exit(app.exec())
+        
+        
+        

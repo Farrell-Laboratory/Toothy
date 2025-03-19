@@ -444,17 +444,6 @@ def load_seizures(ddir):
     else:
         seqs, thres, thr = [], None, None
     return seqs, thres, thr
-
-
-def load_ds_csd(ddir, iprb):
-    """ Load or create dictionary of CSD data for probe $iprb """
-    # load DS CSDs
-    if os.path.exists(Path(ddir, f'ds_csd_{iprb}.npz')):
-        with np.load(Path(ddir,f'ds_csd_{iprb}.npz'), allow_pickle=True) as npz:
-            csd_dict = dict(npz)
-    else:
-        csd_dict = dict.fromkeys(['raw_csd','filt_csd','norm_filt_csd','csd_chs'])
-    return csd_dict
     
 
 def load_bp(ddir, key='', iprb=-1):
@@ -534,7 +523,7 @@ def load_event_dfs(ddir, event, iprb=-1, mask=False):
         LLIST.append([DF_ALL, DF_MEAN])
         
     if 0 <= iprb < len(LLIST):
-        return LLIST[i]
+        return LLIST[iprb]
     else:
         return LLIST
 
@@ -562,27 +551,61 @@ def estimate_hil_chan(SWR_DATA, noise_idx=np.array([], dtype='int')):
     ripple_percentile = np.percentile(SWR_DATA, 99.9, axis=1)
     ripple_percentile[noise_idx] = np.nan
     return np.nanargmax(ripple_percentile)
-    
 
-def load_event_channels(ddir, iprb, DATA=None, STD=None, NOISE_TRAIN=None):
-    """ Load/estimate optimal theta, ripple, and hilus channels for given probe """
-    if os.path.exists(Path(ddir, f'theta_ripple_hil_chan_{iprb}.npy')):
-        # load event channels for given probe
-        event_channels = np.load(Path(ddir, f'theta_ripple_hil_chan_{iprb}.npy'))
-    elif os.path.exists(Path(ddir, 'theta_ripple_hil_chan.npy')):
-        # load general event channels
-        event_channels = np.load(Path(ddir, 'theta_ripple_hil_chan.npy'))
+
+# SHANK-AWARE FUNCTIONS
+
+def load_event_channels(ddir, iprb, ishank=-1):
+    probe_group = prif.read_probeinterface(Path(ddir, 'probe_group'))
+    probe = probe_group.probes[iprb]
+    nprobes = len(probe_group.probes)
+    nshanks = probe.get_shank_count()
+    # try loading channels
+    ppath1 = Path(ddir, f'theta_ripple_hil_chan_{iprb}.npy')
+    ppath2 = Path(ddir, 'theta_ripple_hil_chan.npy')
+    if os.path.isfile(ppath1): # event channels saved for the given probe
+        event_channels = list(np.load(ppath1, allow_pickle=True))
+        # for single-shank probe, convert [a,b,c] to [[a,b,c]] 
+        if nshanks==1 and len(event_channels)==3 and all([np.ndim(x)==0 for x in event_channels]):
+            event_channels = [event_channels]
+            np.save(ppath1, event_channels)
+        event_channels = [list(x) for x in event_channels]
+    elif os.path.isfile(ppath2) and nprobes==1 and nshanks==1:
+        # for recording with one single-shank probe, can use generic channels
+        event_channels = [list(np.load(ppath2))]
     else:
-        # estimate optimal event channels
-        if DATA is None : DATA = load_bp(ddir, '', iprb)
-        if STD is None  : STD  = csv2list(ddir, 'channel_bp_std')[iprb]
-        if NOISE_TRAIN is None: NOISE_TRAIN = load_noise_channels(ddir, iprb)
-        noise_idx = np.nonzero(NOISE_TRAIN)[0]
-        theta_chan  = estimate_theta_chan(STD, noise_idx)
-        ripple_chan = estimate_ripple_chan(STD, noise_idx)
-        hil_chan    = estimate_hil_chan(DATA['swr'], noise_idx)
-        event_channels = [theta_chan, ripple_chan, hil_chan]
-    return event_channels
+        event_channels = [[] for _ in range(nshanks)]
+    if 0 <= ishank < len(event_channels):
+        return event_channels[ishank]
+    else:
+        return event_channels
+
+
+def load_ds_dataset(ddir, iprb, ishank=-1, fill_shank=True):
+    try:
+        DS_DF = pd.read_csv(Path(ddir, f'DS_DF_{iprb}')).reset_index(drop=True)
+    except:
+        return None
+    if 'shank' not in DS_DF.columns:
+        probe_group = prif.read_probeinterface(Path(ddir, 'probe_group'))
+        probe = probe_group.probes[iprb]
+        # match each hilar channel index to the corresponding shank ID
+        shank_ids = np.array(probe.shank_ids, dtype='int')
+        tups = [(ch, shank_ids[ch]) for ch in np.unique(DS_DF.ch)]
+        # update dataframe
+        DS_DF['shank'] = 0
+        for ch,shkID in tups:
+            DS_DF.iloc[np.where(DS_DF.ch==ch)[0], -1] = shkID
+        if fill_shank==True:
+            print(f'Updating DS_DF_{iprb} dataframe with "shank" column...')
+            DS_DF.to_csv(Path(ddir, f'DS_DF_{iprb}'), index_label=False)
+    if ishank == -1:
+        return DS_DF
+    elif ishank in DS_DF.shank:
+        ddf = pd.DataFrame(DS_DF[DS_DF.shank==ishank]).reset_index(drop=True)
+        return ddf
+    else:
+        return pd.DataFrame(columns=DS_DF.columns)
 
 
 ##################################################

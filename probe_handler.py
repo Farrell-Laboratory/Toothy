@@ -5,6 +5,7 @@ Created on Sun Oct  6 03:47:14 2024
 
 @author: amandaschott
 """
+import sys
 import os
 import numpy as np
 import pandas as pd
@@ -84,6 +85,126 @@ def return_valid_probe(arg, use_dummy=False, skip_loading=False):
         probe.name = 'DUMMY_PROBE'
     return probe
 
+class ElectrodeWidget(QtWidgets.QWidget):
+    updated_signal = QtCore.pyqtSignal()
+    def __init__(self, **kwargs):
+        super().__init__()
+        # contact shape
+        self.elshape_w = gi.LabeledCombobox('Shape')
+        self.elshape_w.addItems(['Circle', 'Square', 'Rectangle'])
+        # contact area/radius/width/height
+        kw = dict(double=True, maximum=99999, decimals=1, suffix=' \u00B5m')
+        self.el_area_w = gi.LabeledSpinbox('Contact area', **kw) # circles0/squares0
+        self.el_area_w.qw.setSuffix(' \u00B5m\u00B2') # unicode um^2
+        self.el_radius_w = gi.LabeledSpinbox('Contact radius', **kw) # circles1
+        self.el_height_w = gi.LabeledSpinbox('Contact height', **kw) # squares1/rect0
+        self.el_width_w = gi.LabeledSpinbox('Contact width', **kw)   # rect1
+        
+        self.init_layout()
+        
+        # initialize contact params
+        el_shape = kwargs.get('el_shape', 'circle')
+        el_area = np.round(kwargs.get('el_area', 225.0), 1)
+        el_h = np.round(kwargs.get('el_h', 12.5), 1)
+        self.elshape_w.setCurrentText(el_shape.capitalize())
+        self.el_area_w.setValue(el_area)
+        self.el_height_w.setValue(el_h)
+        self.new_shape(el_shape)
+        
+        self.connect_signals()
+    
+    def connect_signals(self):
+        self.elshape_w.qw.currentTextChanged.connect(self.new_shape)
+        self.el_area_w.qw.valueChanged.connect(self.new_area)
+        self.el_radius_w.qw.valueChanged.connect(self.new_radius)
+        self.el_height_w.qw.valueChanged.connect(self.new_height)
+        self.el_width_w.qw.valueChanged.connect(self.new_width)
+        
+    def new_shape(self, txt):
+        el_shape = txt.lower()
+        # show/hide widgets
+        is_sym = bool(el_shape in ['circle','square'])
+        self.el_area_w.setVisible(is_sym)
+        self.el_width_w.setVisible(not is_sym)
+        A = self.el_area_w.value()
+        if is_sym:
+            x = bool(el_shape=='circle')
+            self.el_radius_w.setVisible(x)
+            self.el_height_w.setVisible(not x)
+            # update radius/width from given area
+            if x: pyfx.stealthy(self.el_radius_w.qw, np.sqrt(A/np.pi))
+            else: pyfx.stealthy(self.el_height_w.qw, np.sqrt(A))
+        else: # update rectangle width from given area and height
+            self.el_radius_w.setVisible(False)
+            self.el_height_w.setVisible(True)
+            pyfx.stealthy(self.el_width_w.qw, A/self.el_height_w.value())
+        self.updated_signal.emit()
+    
+    def new_area(self, A):
+        # user changed area (circle/square)
+        pyfx.stealthy(self.el_radius_w.qw, np.sqrt(A/np.pi))
+        pyfx.stealthy(self.el_height_w.qw, np.sqrt(A))
+        self.updated_signal.emit()
+    
+    def new_radius(self, r):
+        A = np.pi * r**2
+        pyfx.stealthy(self.el_area_w.qw, A)
+        self.updated_signal.emit()
+    
+    def new_height(self, h):
+        if self.elshape_w.currentText() == 'Square'     : A = h**2
+        elif self.elshape_w.currentText() == 'Rectangle': A = h * self.el_width_w.value()
+        pyfx.stealthy(self.el_area_w.qw, A)
+        self.updated_signal.emit()
+    
+    def new_width(self, w):
+        A = w * self.el_height_w.value()
+        pyfx.stealthy(self.el_area_w.qw, A)
+        self.updated_signal.emit()
+    
+    def init_layout(self):
+        self.layout = QtWidgets.QHBoxLayout(self)
+        self.layout.addWidget(self.elshape_w)
+        self.layout.addWidget(self.el_area_w)
+        self.layout.addWidget(self.el_radius_w)
+        self.layout.addWidget(self.el_width_w)
+        self.layout.addWidget(self.el_height_w)
+    
+    def get_contact_shape_kwargs(self):
+        el_shape = self.elshape_w.currentText().lower()
+        if el_shape == 'circle':
+            shape_kw = {'radius' : self.el_radius_w.value()}
+        elif el_shape == 'square':
+            shape_kw = {'width' : self.el_height_w.value()}
+        elif el_shape == 'rectangle':
+            el_shape = 'rect'
+            shape_kw = {'width' : self.el_width_w.value(),
+                        'height' : self.el_height_w.value()}
+        return el_shape, shape_kw
+    
+    def set_params_from_probe(self, probe):
+        # load electrode shape and size
+        shank = probe.get_shanks()[0]
+        el_shape = shank.contact_shapes[0]
+        shape_kw = shank.contact_shape_params[0]
+        if el_shape == 'circle':
+            r = shape_kw['radius']
+            pyfx.stealthy(self.el_radius_w.qw, r)
+            A = np.pi * r**2  # calculate area from radius
+        else:
+            w = shape_kw['width']
+            if el_shape == 'square':
+                pyfx.stealthy(self.el_height_w.qw, w)
+                A = w**2  # calculate area as squared width/height
+            elif el_shape == 'rect':
+                h = shape_kw['height']
+                pyfx.stealthy(self.el_height_w.qw, h)
+                pyfx.stealthy(self.el_width_w.qw, w)
+                A = w * h # calculate area as length * width
+                el_shape = 'rectangle'
+        pyfx.stealthy(self.el_area_w.qw, A)
+        pyfx.stealthy(self.elshape_w.qw, el_shape.capitalize())
+        self.new_shape(el_shape)
 
 class probesimple(QtWidgets.QWidget):
     check_signal = QtCore.pyqtSignal()
@@ -124,90 +245,104 @@ class probesimple(QtWidgets.QWidget):
         self.name_lay.addWidget(self.name_w)
         #name_lay.addWidget(self.toggle_btn)
         
-        # x and y-coordinates
-        self.xcoor_input = gi.LabeledWidget(QtWidgets.QTextEdit,
-                                            'Enter X-coordinates for each electrode')
-        self.ycoor_input = gi.LabeledWidget(QtWidgets.QTextEdit,
-                                            'Enter Y-coordinates for each electrode')
-        self.shk_input = gi.LabeledWidget(QtWidgets.QTextEdit,
-                                            'Electrode shank IDs (multi-shank probes only)')
-        self.chMap_input = gi.LabeledWidget(QtWidgets.QTextEdit,
-                                            'Channel map (probe to data rows)')
-        for item in [self.xcoor_input, self.ycoor_input, self.shk_input, self.chMap_input]:
-            item.qw.setFixedHeight(txtbox_height)
+        # create QTextEdit widgets for pasting probe data
+        text_inputs = [QtWidgets.QTextEdit() for _ in range(4)]
+        _ = [te.setFixedHeight(txtbox_height) for te in text_inputs]
+        self.xcoor_input, self.ycoor_input, self.shk_input, self.chMap_input = text_inputs
+        self.chMap_input.setReadOnly(True)
+        captions = ['Enter X-coordinates for each electrode',
+                    'Enter Y-coordinates for each electrode',
+                    'Electrode shank IDs',
+                    'Channel map']
+        for i,txt in enumerate(captions):
+            txt_widget = QtWidgets.QWidget()
+            txt_vbox = QtWidgets.QVBoxLayout(txt_widget)
+            txt_vbox.setContentsMargins(0,0,0,0)
+            caption_hlay = QtWidgets.QHBoxLayout()
+            caption_hlay.setContentsMargins(0,0,0,0)
+            lbl = QtWidgets.QLabel(txt)
+            caption_hlay.addWidget(lbl)
+            if i==2:
+                self.assign_shanks_chk = QtWidgets.QCheckBox('Use x-coordinates')
+                caption_hlay.addStretch()
+                caption_hlay.addWidget(self.assign_shanks_chk)
+            txt_vbox.addLayout(caption_hlay)
+            txt_vbox.addWidget(text_inputs[i])
+            self.layout.addWidget(txt_widget)
             
         # contact dimensions
-        contact_w = QtWidgets.QFrame()
-        contact_hlay = QtWidgets.QHBoxLayout(contact_w)
-        contact_hlay.setContentsMargins(0,0,0,0)
-        contact_hlay.setSpacing(15)
-        self.elh_w = gi.LabeledSpinbox('Contact height', double=True, maximum=99999, decimals=1, suffix=' \u00B5m') # unicode (um)
-        self.elw_w = gi.LabeledSpinbox('Contact width', double=True, maximum=99999, decimals=1, suffix=' \u00B5m')
-        self.elw_w.setEnabled(False)  # enabled for rectangle shape only
-        self.elshape_w = gi.LabeledCombobox('Shape')
-        self.elshape_w.addItems(['Circle', 'Square', 'Rectangle'])
-        # set default values if given
-        self.elh_w.qw.setValue(self.kwargs.get('el_h', self.elh_w.qw.value()))
-        self.elw_w.qw.setValue(self.kwargs.get('el_w', self.elw_w.qw.value()))
-        if 'el_shape' in self.kwargs and self.kwargs['el_shape'] in ['circle','square','rect']: 
-            self.elshape_w.setCurrentIndex(['circle','square','rect'].index(self.kwargs['el_shape']))
-        contact_hlay.addWidget(self.elh_w)
-        contact_hlay.addWidget(self.elw_w)
-        contact_hlay.addWidget(self.elshape_w)
-        
-        self.layout.addWidget(self.xcoor_input)
-        self.layout.addWidget(self.ycoor_input)
-        self.layout.addWidget(self.shk_input)
-        self.layout.addWidget(self.chMap_input)
-        self.layout.addWidget(contact_w)
+        self.contact_w = ElectrodeWidget(**self.kwargs)
+        self.layout.addWidget(self.contact_w)
     
     def connect_signals(self):
         self.name_w.qw.textChanged.connect(self.enable_ccm_btn)
-        self.xcoor_input.qw.textChanged.connect(self.enable_ccm_btn) # changed x-coordinates
-        self.ycoor_input.qw.textChanged.connect(self.enable_ccm_btn) # changed y-coordinates
-        self.shk_input.qw.textChanged.connect(self.enable_ccm_btn)   # changed shank mapping
-        self.chMap_input.qw.textChanged.connect(self.enable_ccm_btn) # changed channel mapping
-        self.elw_w.qw.valueChanged.connect(self.enable_ccm_btn) # changed contact width
-        self.elh_w.qw.valueChanged.connect(self.enable_ccm_btn) # changed contact height
-        self.elshape_w.qw.currentTextChanged.connect(self.enable_ccm_btn) # changed contact shape
+        self.xcoor_input.textChanged.connect(self.enable_ccm_btn) # changed x-coordinates
+        self.ycoor_input.textChanged.connect(self.enable_ccm_btn) # changed y-coordinates
+        self.shk_input.textChanged.connect(self.enable_ccm_btn)   # changed shank mapping
+        self.chMap_input.textChanged.connect(self.enable_ccm_btn) # changed channel mapping
+        self.assign_shanks_chk.toggled.connect(self.assign_shanks_by_x) # auto-fill shank IDs by x-pos
+        self.contact_w.updated_signal.connect(self.enable_ccm_btn)
+        #self.elw_w.qw.valueChanged.connect(self.enable_ccm_btn) # changed contact width
+        #self.elh_w.qw.valueChanged.connect(self.enable_ccm_btn) # changed contact height
+        #self.elshape_w.qw.currentTextChanged.connect(self.enable_ccm_btn) # changed contact shape
         self.setStyleSheet('QTextEdit { border : 2px solid gray; }')
-    
+        
+    def assign_shanks_by_x(self, chk):
+        self.shk_input.setReadOnly(chk)
+        if not chk:
+            self.shk_input.setPlainText('')
+        else:
+            xdata = ''.join(self.xcoor_input.toPlainText().split())
+            try:
+                xc = np.array(eval(xdata), dtype='float')
+                shank_centers = np.unique(xc)
+                shankmap = {x:i for i,x in enumerate(shank_centers)}
+                shank_ids = [shankmap[x] for x in xc]
+                self.shk_input.setPlainText(str(shank_ids))
+            except:
+                self.shk_input.setPlainText('')
+        
     def ddict_from_gui(self):
         probe_name = self.name_w.qw.text().strip()
-        xdata      = ''.join(self.xcoor_input.qw.toPlainText().split())
-        ydata      = ''.join(self.ycoor_input.qw.toPlainText().split())
-        shk_data   = ''.join(self.shk_input.qw.toPlainText().split())
-        cmap_data  = ''.join(self.chMap_input.qw.toPlainText().split())
-        
+        xdata      = ''.join(self.xcoor_input.toPlainText().split())
+        ydata      = ''.join(self.ycoor_input.toPlainText().split())
+        shk_data   = ''.join(self.shk_input.toPlainText().split())
+        cmap_data  = ''.join(self.chMap_input.toPlainText().split())
         try: 
-            xc = np.array(eval(xdata), dtype='float')   # x-coordinates
-            yc = np.array(eval(ydata), dtype='float')   # y-coordinates
-            if shk_data  == '' : shk = np.ones_like(xc, dtype='int')    # shank IDs
+            xc = np.array(eval(xdata), dtype='float') # x-coordinates
+            yc = np.array(eval(ydata), dtype='float') # y-coordinates
+            if shk_data  == '' : shk = np.zeros_like(xc, dtype='int')  # shank IDs
             else               : shk = np.array(eval(shk_data), dtype='int')
-            if cmap_data == '' : cmap = np.arange(xc.size, dtype='int') # channel map
+            if cmap_data == '' : cmap = np.array([])#np.arange(xc.size, dtype='int') # channel map
             else               : cmap = np.atleast_1d(np.array(eval(cmap_data), dtype='int'))
         except:
             xc, yc, shk, cmap = [np.array([]), np.array([]), np.array([]), np.array([])]
-        
+        el_shape, shape_kw = self.contact_w.get_contact_shape_kwargs()
         ddict = dict(probe_name = probe_name,
                      xc = xc,
                      yc = yc,
                      shk = shk,
                      cmap = cmap,
-                     el_w = self.elw_w.value(),
-                     el_h = self.elh_w.value(),
-                     el_shape = self.elshape_w.currentText().lower())
+                     el_shape = el_shape,
+                     shape_kw = shape_kw)
+                     # el_w = self.elw_w.value(),
+                     # el_h = self.elh_w.value(),
+                     # el_shape = self.elshape_w.currentText().lower())
         return ddict
-        
+    
     
     def enable_ccm_btn(self):
-        # symmetrical contacts (i.e. circles/squares) use electrode height only
-        shape = self.elshape_w.currentText().lower()
-        is_sym = bool(shape in ['circle', 'square'])
-        self.elw_w.setEnabled(not is_sym)
-        if is_sym:
-            pyfx.stealthy(self.elw_w.qw, self.elh_w.value())
-            
+        if self.sender() == self.xcoor_input and self.assign_shanks_chk.isChecked():
+            xdata = ''.join(self.xcoor_input.toPlainText().split())
+            try:
+                xc = np.array(eval(xdata), dtype='float')
+                shank_centers = np.unique(xc)
+                shankmap = {x:i for i,x in enumerate(shank_centers)}
+                shank_ids = [shankmap[x] for x in xc]
+                pyfx.stealthy(self.shk_input, str(shank_ids))
+            except:
+                pyfx.stealthy(self.shk_input, '')
+        
         # check if current settings describe a valid probe
         ddict = self.ddict_from_gui()
         self.check_probe(ddict)
@@ -217,12 +352,15 @@ class probesimple(QtWidgets.QWidget):
     def check_probe(self, ddict):
         PP = pd.Series(ddict)
         
-        nelems = [PP.xc.size, PP.yc.size, PP.shk.size, PP.cmap.size]
+        nelems = [PP.xc.size, PP.yc.size, PP.shk.size]#, PP.cmap.size]
         a = bool(PP.probe_name != '' and                  # probe name given
                  len(PP.probe_name.split()) == 1)         # no spaces in probe name
         b = bool(nelems[0] > 0 and nelems[1] > 0)         # x and y-coordinates given
         c = bool(len(np.unique(nelems)) == 1)             # equal length arrays
-        d = bool(all(sorted(PP.cmap) == np.arange(PP.cmap.size)))  # valid channel map
+        if len(PP.cmap)==0:
+            d = True
+        else:
+            d = bool(all(sorted(PP.cmap) == np.arange(PP.cmap.size)))  # valid channel map
         #d = bool(PP.cmap.size == np.unique(PP.cmap).size) # no duplicates in channel map
         
         x = bool(a and b and c and d)
@@ -232,73 +370,107 @@ class probesimple(QtWidgets.QWidget):
     
     def construct_probe(self):#, arg=None, pplot=True):
         PP = pd.Series(self.ddict_from_gui())
-        # create dataframe
-        pdf = pd.DataFrame(dict(chanMap=PP.cmap, xc=PP.xc, yc=PP.yc, shank=PP.shk))
+        # shank_ids = PP.shk
+        # nshanks = len(np.unique(shank_ids))
+        # ch_per_shank = []
+        # #icols = [np.where(shank_x == xc)[0] for xc in np.unique(shank_x)]
         
-        # deduce electrode config
-        ishank = np.where(PP.shk==np.unique(PP.shk)[0])[0]
-        shank_x, shank_y = PP.xc[ishank], PP.yc[ishank]
-        ncols = len(np.unique(shank_x))
-        icols = [np.where(shank_x == xc)[0] for xc in np.unique(shank_x)]
-        ydifs_per_col = [np.diff(sorted(shank_y[icol])) for icol in icols]
-        mono_cols = [len(set(ydifs))==1 for ydifs in ydifs_per_col]
-        tet_shape = None
-        if ncols in [2,3] and mono_cols[1] == False: # potential tetrode
-            # square: 2 columns, both irregularly spaced
-            if ncols == 2 and mono_cols == [False,False]: tet_shape = 'square'
-            # diamond: 3 columns, only center irregularly spaced
-            elif ncols == 3 and mono_cols == [True,False,True]: tet_shape = 'diamond'
-        if tet_shape is None:
-            # linear/polytrode config: index column-wise (shank > x-coor > y-coor)
-            df = pdf.sort_values(['shank','xc','yc'], ascending=[True,True,False]).reset_index(drop=True)
-        else:
-            # tetrode config: index row-wise (shank > y-coor > x-coor), then rearrange by group
-            ddf = pdf.sort_values(['shank','yc','xc'], ascending=[True,False,True]).reset_index(drop=True)
-            nsites = int(len(ddf) / 4)
-            if tet_shape == 'square':    # top L > bottom L > top R > bottom R
-                adj = [0,1,-1,0]
-            elif tet_shape == 'diamond': # L > top M > bottom M > R
-                adj = [1,-1,1,-1]
-            df = ddf.set_index(ddf.index.values + np.tile(adj, nsites)).sort_index()
-        # map default device indices to config-specific contact indices
-        if all(PP.cmap == np.arange(PP.xc.size)):
-            df['chanMap'] = sorted(df['chanMap'].values)
+        # # create dataframe
+        # pdf = pd.DataFrame(dict(chanMap=PP.cmap, xc=PP.xc, yc=PP.yc, shank=PP.shk))
+        # pdb.set_trace()
+        
+        
+        
+        # # deduce electrode config
+        # ishank = np.where(PP.shk==np.unique(PP.shk)[0])[0]
+        # shank_x, shank_y = PP.xc[ishank], PP.yc[ishank]
+        # ncols = len(np.unique(shank_x))
+        # icols = [np.where(shank_x == xc)[0] for xc in np.unique(shank_x)]
+        # ydifs_per_col = [np.diff(sorted(shank_y[icol])) for icol in icols]
+        # mono_cols = [len(set(ydifs))==1 for ydifs in ydifs_per_col]
+        # tet_shape = None
+        # if ncols in [2,3] and mono_cols[1] == False: # potential tetrode
+        #     # square: 2 columns, both irregularly spaced
+        #     if ncols == 2 and mono_cols == [False,False]: tet_shape = 'square'
+        #     # diamond: 3 columns, only center irregularly spaced
+        #     elif ncols == 3 and mono_cols == [True,False,True]: tet_shape = 'diamond'
+        # if tet_shape is None:
+        #     # linear/polytrode config: index column-wise (shank > x-coor > y-coor)
+        #     df = pdf.sort_values(['shank','xc','yc'], ascending=[True,True,False]).reset_index(drop=True)
+        # else:
+        #     # tetrode config: index row-wise (shank > y-coor > x-coor), then rearrange by group
+        #     ddf = pdf.sort_values(['shank','yc','xc'], ascending=[True,False,True]).reset_index(drop=True)
+        #     nsites = int(len(ddf) / 4)
+        #     if tet_shape == 'square':    # top L > bottom L > top R > bottom R
+        #         adj = [0,1,-1,0]
+        #     elif tet_shape == 'diamond': # L > top M > bottom M > R
+        #         adj = [1,-1,1,-1]
+        #     df = ddf.set_index(ddf.index.values + np.tile(adj, nsites)).sort_index()
+        # # map default device indices to config-specific contact indices
+        # if all(PP.cmap == np.arange(PP.xc.size)):
+        #     df['chanMap'] = sorted(df['chanMap'].values)
         # get contact shape/size
-        contact_shapes, shape_kw = get_contact_shape_kwargs(PP.el_shape, el_h=PP.el_h, el_w=PP.el_w)
-        # initialize probe data object
-        probe = prif.Probe(ndim=2, name=PP.probe_name)
-        probe.set_contacts(np.array(df[['xc','yc']]), shapes=contact_shapes, 
-                           shape_params=shape_kw, shank_ids=df.shank)
-        probe.create_auto_shape('tip', margin=20)
-        self.probe = prif.combine_probes([probe])
-        self.probe.set_contact_ids(df.index.values)
-        self.probe.set_device_channel_indices(df.chanMap)
+        #contact_shapes, shape_kw = get_contact_shape_kwargs(PP.el_shape, el_h=PP.el_h, el_w=PP.el_w)
+        #contact_shapes, shape_kw = self.contact_w.get_contact_shape_kwargs()
+        pdf = pd.DataFrame(dict(xc=PP.xc, yc=PP.yc, shank=PP.shk))
+        if len(PP.cmap)==0:
+            # linear/polytrode config: index column-wise (shank > x-coor > y-coor)
+            df = pdf.sort_values(['shank','xc','yc'], ascending=[True,True,False])
+            df['chanMap'] = np.array(df.index.values)
+        else:
+            df = pd.DataFrame(pdf)
+            df['chanMap'] = PP.cmap
+        df.set_index(df['shank'].values, inplace=True)
+        
+        shank_ids = df['shank'].values
+        ishanks, ch_per_shank = zip(*[(x,list(shank_ids).count(x)) for x in np.unique(shank_ids)])
+        nshanks = len(ishanks)
+        
+        shank_list = [] # ffindme
+        for i,shk in enumerate(ishanks):
+            ddf = df.loc[shk]
+            nch_shank = len(ddf)
+            istart = sum(ch_per_shank[0:i])
+            
+            prb = prif.Probe(ndim=2)
+            prb.set_contacts(np.array(ddf[['xc','yc']]), shapes=PP.el_shape, 
+                             shape_params=PP.shape_kw)
+            prb.set_shank_ids(np.ones(nch_shank, dtype='int') + i)
+            prb.set_contact_ids(np.arange(nch_shank) + istart)
+            prb.set_device_channel_indices(np.array(ddf['chanMap'].values))
+            prb.create_auto_shape('tip', margin=20)
+            shank_list.append(prb)
+            
+        self.probe = prif.combine_probes(shank_list)  # multi-shank probe
+        contact_ids = np.concatenate([prb.contact_ids for prb in shank_list])
+        dev_indexes = np.concatenate([prb.device_channel_indices for prb in shank_list])
+        self.probe.set_contact_ids(contact_ids)
+        self.probe.set_device_channel_indices(dev_indexes)
         self.probe.annotate(**{'name':PP.probe_name})
-        self.generate_signal.emit()
     
     
     def update_gui_from_probe(self, probe, show_msg=True):
+        # no assignment option when loading probe data
+        self.assign_shanks_chk.blockSignals(True)
+        self.assign_shanks_chk.setChecked(False)
+        self.assign_shanks_chk.blockSignals(False)
+        self.shk_input.setReadOnly(False)
+        
         # update coordinate positions and channel/shank mapping
         pyfx.stealthy(self.name_w.qw, probe.name)
-        xpos, ypos = probe.contact_positions.T
-        pyfx.stealthy(self.xcoor_input.qw, str(list(xpos)))
-        pyfx.stealthy(self.ycoor_input.qw, str(list(ypos)))
-        pyfx.stealthy(self.shk_input.qw, str(list(probe.shank_ids.astype('int'))))
-        pyfx.stealthy(self.chMap_input.qw,  str(list(probe.device_channel_indices)))
+        dev_idx = np.array(probe.device_channel_indices)
+        # un-sort contact positions/shank IDs to their original order
+        xpos, ypos = np.array(probe.contact_positions).T#[dev_idx, :].T
+        shks = probe.shank_ids.astype('int')#[dev_idx]
+        
+        pyfx.stealthy(self.xcoor_input, str(list(xpos)))
+        pyfx.stealthy(self.ycoor_input, str(list(ypos)))
+        pyfx.stealthy(self.shk_input, str(list(shks)))
+        pyfx.stealthy(self.chMap_input,  str(list(dev_idx)))
         
         ### electrode contacts
-        shank = probe.get_shanks()[0]
-        shape = shank.contact_shapes[0]
-        if shape=='circle':
-            elh, elw = [shank.contact_shape_params[0]['radius'] * 2] * 2
-        elif shape=='square':
-            elh, elw = [shank.contact_shape_params[0]['width']] * 2
-        elif shape.startswith('rect'):
-            elw, elh = [shank.contact_shape_params[0][k] for k in ['width','height']]
-            shape='rectangle'
-        pyfx.stealthy(self.elh_w.qw, elh)
-        pyfx.stealthy(self.elw_w.qw, elw)
-        pyfx.stealthy(self.elshape_w, shape.capitalize())
+        self.contact_w.set_params_from_probe(probe)
+        
         self.enable_ccm_btn()
         
 
@@ -514,8 +686,10 @@ class probething(QtWidgets.QWidget):
         contact_hlay = QtWidgets.QHBoxLayout(contact_w)
         contact_hlay.setContentsMargins(0,0,0,0)
         contact_hlay.setSpacing(15)
-        self.elh_w = gi.LabeledSpinbox('Contact height', double=True, maximum=99999, decimals=1, suffix=' \u00B5m')
-        self.elw_w = gi.LabeledSpinbox('Contact width', double=True, maximum=99999, decimals=1, suffix=' \u00B5m')
+        self.elh_w = gi.LabeledSpinbox('Contact height', double=True, maximum=99999, 
+                                       decimals=1, suffix=' \u00B5m')
+        self.elw_w = gi.LabeledSpinbox('Contact width', double=True, maximum=99999, 
+                                       decimals=1, suffix=' \u00B5m')
         self.elw_w.setEnabled(False)  # enabled for rectangle shape only
         self.elshape_w = gi.LabeledCombobox('Shape')
         self.elshape_w.addItems(['Circle', 'Square', 'Rectangle'])
@@ -554,17 +728,17 @@ class probething(QtWidgets.QWidget):
         
     def connect_signals(self):
         """ Connect widgets to functions """
-        self.name_w.qw.textChanged.connect(self.enable_ccm_btn)   # changed probe name
-        self.nch_sbox.valueChanged.connect(self.enable_ccm_btn)   # changed number of channels
-        self.nshk_sbox.valueChanged.connect(self.enable_ccm_btn)  # changed number of shanks
-        _ = [chbox.qw.valueChanged.connect(self.enable_ccm_btn) for chbox in self.shkch_list] # changed shank channels
-        self.shkd_sbox.valueChanged.connect(self.enable_ccm_btn)  # changed shank spacing
+        self.name_w.qw.textChanged.connect(self.enable_ccm_btn)   # probe name
+        self.nch_sbox.valueChanged.connect(self.enable_ccm_btn)   # no. channels
+        self.nshk_sbox.valueChanged.connect(self.enable_ccm_btn)  # no. shanks/ch per shank
+        _ = [chbox.qw.valueChanged.connect(self.enable_ccm_btn) for chbox in self.shkch_list]
+        self.shkd_sbox.valueChanged.connect(self.enable_ccm_btn)  # shank spacing
         self.config_cbox.currentTextChanged.connect(self.enable_ccm_btn) # changed configuration
-        self.ncol_sbox.valueChanged.connect(self.enable_ccm_btn)  # changed number of electrode columns
-        _ = [tbox.qw.valueChanged.connect(self.enable_ccm_btn) for tbox in self.tip_list] # changed tip offset
-        self.eldy_w.qw.valueChanged.connect(self.enable_ccm_btn)  # changed y-spacing
-        self.eldx_w.qw.valueChanged.connect(self.enable_ccm_btn)  # changed x-spacing between columns/across site
-        self.eldx2_w.qw.valueChanged.connect(self.enable_ccm_btn) # changed y-spacing across site
+        self.ncol_sbox.valueChanged.connect(self.enable_ccm_btn)  # no. electrode columns
+        _ = [tbox.qw.valueChanged.connect(self.enable_ccm_btn) for tbox in self.tip_list] # tip offset
+        self.eldy_w.qw.valueChanged.connect(self.enable_ccm_btn)  # y-spacing
+        self.eldx_w.qw.valueChanged.connect(self.enable_ccm_btn)  # x-spacing between cols/across site
+        self.eldx2_w.qw.valueChanged.connect(self.enable_ccm_btn) # y-spacing across site
         self.shkchmatch_btn.clicked.connect(self.match_values)
         self.tmatch_btn.clicked.connect(self.match_values)
         self.elw_w.qw.valueChanged.connect(self.enable_ccm_btn) # changed contact width
@@ -681,7 +855,7 @@ class probething(QtWidgets.QWidget):
         # get contact shape/size
         contact_shapes, shape_kw = get_contact_shape_kwargs(PP.el_shape, el_h=PP.el_h, el_w=PP.el_w)
         
-        shank_list = []
+        shank_list = [] # ffindme
         for i in range(PP.nshanks):
             nch_shank = PP.ch_per_shank[i]  # no. channels on shank (int)
             nch_cols = PP.ch_per_col[i]     # no. channels for each column (list)
@@ -827,7 +1001,8 @@ class probething(QtWidgets.QWidget):
         else: shank_spacing = 0
         if nshanks > 16:
             if show_msg:
-                msgbox = gi.MsgboxError(msg='Probe has too many shanks!<br>Please load using "Paste" method.')
+                msgbox = gi.MsgboxError(msg=('Probe has too many shanks!<br>'
+                                             'Please load using "Paste" method.'))
                 msgbox.exec()
             return
             
@@ -837,7 +1012,8 @@ class probething(QtWidgets.QWidget):
         ncols = len(np.unique(shank_x))
         if ncols > 16:
             if show_msg:
-                msgbox = gi.MsgboxError(msg='Probe has too many electrode columns!<br>Please load using "Paste" method.')
+                msgbox = gi.MsgboxError(msg=('Probe has too many electrode columns!<br>'
+                                             'Please load using "Paste" method.'))
                 msgbox.exec()
             return
         
@@ -845,7 +1021,8 @@ class probething(QtWidgets.QWidget):
         xvals = np.unique(shank_x); xdifs = np.diff(xvals)  # get unique x-values (columns)
         if len(np.unique(xdifs)) > 1:
             if show_msg:
-                msgbox = gi.MsgboxError(msg='Probe has unevenly spaced electrode columns!<br>Please load using "Paste" method.')
+                msgbox = gi.MsgboxError(msg='Probe has unevenly spaced electrode columns!<br>'
+                                        'Please load using "Paste" method.')
                 msgbox.exec()
             return
         icols = [np.where(shank_x == xc)[0] for xc in xvals]
@@ -1042,7 +1219,8 @@ class IFigProbe(QtWidgets.QWidget):
                     llist.append(str(self.probe.device_channel_indices[idx]))
                 if len(llist) > 0:
                     xys = [*self.probe.contact_positions[idx], os.linesep.join(llist)]
-                    axt = self.ax.text(*xys, color='black', ha='center', va='center', fontsize=self.contact_fontsize)
+                    axt = self.ax.text(*xys, color='black', ha='center', va='center', 
+                                       fontsize=self.contact_fontsize)
                     self.ax.contact_text[idx] = axt
             event.canvas.draw()
     
@@ -1194,7 +1372,6 @@ class probegod(QtWidgets.QWidget):
         self.load_btn.clicked.connect(self.load_probe_from_file)
         self.save_btn.clicked.connect(self.save_probe_to_file)
     
-    
     def save_probe_to_file(self):
         res = gi.FileDialog.save_file(data_object=self.probe, filetype='probe', parent=self)
         if res:
@@ -1268,6 +1445,30 @@ class probegod(QtWidgets.QWidget):
             return my_probegod.probe
         return
 
+
+class ProbeObjectPopup(QtWidgets.QDialog):
+    def __init__(self, probe=None, auto_plot=True, parent=None):
+        super().__init__(parent)
+        
+        # initialize central widget
+        self.probegod = probegod(probe=probe, auto_plot=auto_plot)
+        self.accept_btn = self.probegod.accept_btn
+        self.accept_btn.setVisible(False)
+        self.accept_btn.clicked.connect(self.accept)
+        
+        self.layout = QtWidgets.QVBoxLayout(self)
+        self.layout.addWidget(self.probegod)
+        self.layout.setSizeConstraint(QtWidgets.QLayout.SetFixedSize)
+        self.layout.addWidget(self.accept_btn)
+        self.setWindowTitle('Create probe')
+        
+
 if __name__ == '__main__':
-    pyfx.qapp()
-    probegod.run_probe_window()
+    app = QtWidgets.QApplication(sys.argv)
+    app.setStyle('Fusion')
+    app.setQuitOnLastWindowClosed(True)
+    
+    w = ProbeObjectPopup(probe=None)
+    w.show()
+    w.raise_()
+    sys.exit(app.exec())

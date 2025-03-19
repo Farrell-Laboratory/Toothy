@@ -88,7 +88,6 @@ mode_btn_ss = ('QPushButton {'
 class IFigCSD(matplotlib.figure.Figure):
     """ Interactive figure displaying channels in CSD window """
     
-    # def __init__(self, LFP_arr, lfp_time, lfp_fs, DS_DF, event_channels, PARAMS, **kwargs):
     def __init__(self, init_min, init_max, nch, twin=0.2):
         super().__init__()
         
@@ -122,14 +121,13 @@ class IFigCSD(matplotlib.figure.Figure):
         
 class IFigPCA(matplotlib.figure.Figure):
     """ Figure displaying principal component analysis (PCA) for DS classification """
-    def __init__(self, DS_DF, PARAMS):
+    def __init__(self, DS_DF, INIT_CLUS_ALGO):
         super().__init__()
         self.DS_DF = DS_DF
-        self.PARAMS = PARAMS
         
-        init_btn = ['kmeans','dbscan'].index(self.PARAMS['clus_algo'])
+        init_btn = ['kmeans','dbscan'].index(INIT_CLUS_ALGO)
         self.create_subplots(init_btn=init_btn)
-        self.plot_ds_pca(self.PARAMS['clus_algo'])  # initialize plot
+        self.plot_ds_pca(INIT_CLUS_ALGO)  # initialize plot
         
         # set radio button
         ##self.btns.set_active(ibtn)
@@ -142,13 +140,25 @@ class IFigPCA(matplotlib.figure.Figure):
         # create inset axes for radio buttons
         self.bax = self.ax.inset_axes([0, 0.9, 0.2, 0.1])
         self.bax.set_facecolor('whitesmoke')
+        #self.saveax = self.ax.inset_axes([0, 0.90, 0.2, 0.05])
         # create radio button widgets
-        ibtn = ['kmeans', 'dbscan'].index(self.PARAMS['clus_algo'])
-        self.btns = matplotlib.widgets.RadioButtons(self.bax, labels=['K-means','DBSCAN'], active=ibtn,
+        self.btns = matplotlib.widgets.RadioButtons(self.bax, labels=['K-means','DBSCAN'], active=init_btn,
                                                     activecolor='black', radio_props=dict(s=100))
         self.btns.set_label_props(dict(fontsize=['x-large','x-large']))
         self.btns.on_clicked(self.plot_ds_pca)
         
+        self.sax = self.ax.inset_axes([0, 0.85, 0.15, 0.05])
+        self.sax.axis('off')
+        self.chks = matplotlib.widgets.CheckButtons(self.sax, labels=['Switch DS1 vs DS2'], actives=[False],
+                                                    frame_props=dict(s=100))
+        self.chks.set_check_props=(dict(facecolors=['black'], edgecolors=['black']))
+        self.chks.set_label_props(dict(fontsize=['large','large']))
+        self.chks.on_clicked(self.switch_classes)
+    
+    def switch_classes(self, event):
+        for col in ['k_type','db_type','type']:
+            self.DS_DF[col].replace({1:2, 2:1}, inplace=True)
+        self.plot_ds_pca(self.btns.value_selected)
         
     def plot_ds_pca(self, val):
         """ Draw scatter plot (PC1 vs PC2) and clustering results """
@@ -365,6 +375,11 @@ class DS_CSDWidget(QtWidgets.QFrame):
         gbox4_grid.addWidget(self.minN_sbox, 3, 1)
         self.vlay.addWidget(self.gbox4)
         
+        # update classification dataframe with current clustering method/class labels in PCA plot
+        self.save_df_btn = QtWidgets.QPushButton('Update classification')
+        self.save_df_btn.setEnabled(False)
+        self.vlay.addWidget(self.save_df_btn)
+        
         # action buttons
         bbox = QtWidgets.QHBoxLayout()
         self.go_btn = QtWidgets.QPushButton('Calculate')
@@ -394,6 +409,7 @@ class DS_CSDWidget(QtWidgets.QFrame):
         self.nstep_sbox.setValue(int(ddict['spline_nsteps']))
         # clustering params
         self.kmeans_radio.setChecked(ddict['clus_algo']=='kmeans')
+        self.dbscan_radio.setChecked(ddict['clus_algo']=='dbscan')
         self.nclus_sbox.setValue(int(ddict['nclusters']))
         self.eps_sbox.setValue(ddict['eps'])
         self.minN_sbox.setValue(int(ddict['min_clus_samples']))
@@ -450,22 +466,15 @@ class DS_CSDWindow(QtWidgets.QDialog):
     
     cmap = plt.get_cmap('bwr')
     cmap2 = pyfx.truncate_cmap(cmap, 0.2, 0.8)
+    pca_cols = ['pc1', 'pc2', 'k_type', 'db_type', 'type']
+    placeholders = [np.nan, np.nan, -1, -1, -1]
     
-    def __init__(self, ddir, iprb=0, PARAMS=None, parent=None):
+    def __init__(self, ddir, iprb=0, ishank=0, parent=None):
         super().__init__()
         qrect = pyfx.ScreenRect(perc_width=0.8, keep_aspect=False)
         self.setGeometry(qrect)
-        self.ddir = ddir
-        self.iprb = iprb
-        if PARAMS is None: PARAMS = ephys.load_recording_params(self.ddir)
-        self.PARAMS = dict(PARAMS)
         
-        # required: event channels file, probe DS_DF file
-        self.lfp_list, self.lfp_time, self.lfp_fs = ephys.load_lfp(ddir, 'raw', -1)
-        self.noise_list = ephys.load_noise_channels(ddir, -1)
-        self.probe_group = prif.read_probeinterface(Path(ddir, 'probe_group'))
-        self.load_probe_data(self.iprb)
-        
+        self.init_data(ddir, iprb, ishank)
         self.gen_layout()
         
         if self.csd_chs is not None:
@@ -489,51 +498,67 @@ class DS_CSDWindow(QtWidgets.QDialog):
             self.plot_ds_by_type(0.05)
         
         if 'pc1' in self.DS_DF.columns:  # PCA scatterplot
-            self.fig27.plot_ds_pca(self.PARAMS['clus_algo'])
-            init_btn = ['kmeans','dbscan'].index(self.PARAMS['clus_algo'])
+            alg = 'kmeans' if self.DS_DF['k_type'].equals(self.DS_DF['type']) else 'dbscan'
+            self.CSD_PARAMS['clus_algo'] = alg
+            self.fig27.plot_ds_pca(alg)
+            init_btn = ['kmeans','dbscan'].index(alg)
             self.fig27.btns.set_active(init_btn)
+            self.widget.save_df_btn.setEnabled(True)
     
-    
-    def load_probe_data(self, iprb):
-        """ Set data corresponding to the given probe """
+    def init_data(self, ddir, iprb, ishank):
+        self.ddir = ddir
         self.iprb = iprb
-        self.lfp_all = np.array(self.lfp_list[iprb])  # original LFP signals
-        self.channels = np.arange(self.lfp_all.shape[0])
-        self.lfp = deepcopy(self.lfp_all)             
-        self.lfp_interp = deepcopy(self.lfp_all)      # noisy channels are interpolated
-        self.NOISE_TRAIN = np.array(self.noise_list[iprb])
-        noise_idx = np.nonzero(self.NOISE_TRAIN)[0]
-        clean_idx = np.setdiff1d(np.arange(len(self.channels)), noise_idx)
-        for i in noise_idx:
-            self.lfp[i,:] = np.nan  # replace noisy channels in lfp with np.nan
-            # replace noisy channels in lfp_interp with average of two closest (clean) signals
-            if i==0: 
-                self.lfp_interp[i,:] = self.lfp_all[min(clean_idx)]
-            elif i > max(clean_idx):
-                self.lfp_interp[i,:] = self.lfp_all[max(clean_idx)]
-            else:
-                sig1 = self.lfp_all[pyfx.Closest(i, clean_idx[clean_idx < i])]
-                sig2 = self.lfp_all[pyfx.Closest(i, clean_idx[clean_idx > i])]
-                self.lfp_interp[i,:] = np.nanmean([sig1, sig2], axis=0)
-        self.DS_DF = pd.read_csv(Path(self.ddir, f'DS_DF_{iprb}'))  # load DS dataframe
-        self.iev = self.DS_DF.idx.values
-        self.probe = self.probe_group.probes[iprb]
-        # get electrode geometry in meters
-        ypos = np.array(sorted(self.probe.contact_positions[:, 1]))
-        self.coord_electrode = pq.Quantity(ypos, self.probe.si_units).rescale('m')  # um -> m
+        self.ishank = ishank
         
-        self.event_channels= np.load(Path(self.ddir, f'theta_ripple_hil_chan_{iprb}.npy'))
-        self.theta_chan, self.ripple_chan, self.hil_chan = self.event_channels
+        self.probe_group = prif.read_probeinterface(Path(ddir, 'probe_group'))
+        self.probe_list = self.probe_group.probes
+        self.probe = self.probe_list[iprb]
+        self.shank = self.probe.get_shanks()[ishank]
+        # get probe geometry
+        ypos = np.array(sorted(self.shank.contact_positions[:, 1]))
+        self.coord_electrode = pq.Quantity(ypos, self.probe.si_units).rescale('m')  # um -> m
+        # get absolute and relative channels
+        self.shank_channels = self.shank.get_indices()
+        self.channels = np.arange(len(self.shank_channels), dtype='int')
+        # each event channel index is relative to its shank
+        event_channels = ephys.load_event_channels(ddir, iprb, ishank=ishank)
+        rel_event_channels = [list(self.shank_channels).index(ch) for ch in event_channels]
+        self.rel_theta_chan, self.rel_ripple_chan, self.rel_hil_chan = rel_event_channels
+        
+        # load raw LFP signals
+        self.lfp_time = np.load(Path(ddir, 'lfp_time.npy'))
+        self.lfp_fs = int(np.load(Path(ddir, 'lfp_fs.npy')))
+        self.lfp_all = ephys.load_bp(ddir, key='raw', iprb=iprb)[self.shank_channels, :]
+        self.lfp = deepcopy(self.lfp_all)         # noisy channels are replaced with np.nan
+        self.lfp_interp = deepcopy(self.lfp_all)  # noisy channels are interpolated
+        self.NOISE_TRAIN = ephys.load_noise_channels(ddir, iprb=iprb)[self.shank_channels]
+        self.interp_data()
+        
+        # load DS dataframe
+        self.DS_DF = ephys.load_ds_dataset(ddir, iprb, ishank=ishank)
+        if 'pc1' in self.DS_DF.columns and self.DS_DF['pc1'].isnull().all():
+            self.DS_DF.drop(columns=self.pca_cols, inplace=True)
+        self.iev = np.atleast_1d(self.DS_DF.idx.values)
         
         # load/create CSDs
-        csd_dict = ephys.load_ds_csd(self.ddir, iprb)
-        self.raw_csd        = csd_dict.get('raw_csd')
-        self.filt_csd       = csd_dict.get('filt_csd')
-        self.norm_filt_csd  = csd_dict.get('norm_filt_csd')
-        self.csd_chs        = csd_dict.get('csd_chs')
+        NPZpath = str(Path(ddir, f'ds_csd_{iprb}.npz'))
+        self.raw_csd,self.filt_csd,self.norm_filt_csd,self.csd_chs = [None,None,None,None]
+        self.CSD_PARAMS = dict(ephys.load_recording_params(ddir))
+        if os.path.exists(NPZpath):
+            with np.load(NPZpath, allow_pickle=True, mmap_mode='r') as csd_npz:
+                keys = list(csd_npz.keys())
+                k = str(ishank)
+                if k in keys:
+                    ddict = csd_npz[k].item()
+                    self.raw_csd = ddict['raw_csd']
+                    self.filt_csd = ddict['filt_csd']
+                    self.norm_filt_csd = ddict['norm_filt_csd']
+                    self.csd_chs = ddict['csd_chs']
+                if f'{ishank}_params' in keys:
+                    self.CSD_PARAMS = csd_npz[f'{ishank}_params'].item()
         if self.csd_chs is not None:
             self.csd_lfp = self.lfp_interp[self.csd_chs, :][:, self.iev]
-        
+            
         if 'type' in self.DS_DF.columns:
             # get table rows and recording indexes of DS1 vs DS2
             self.irows_ds1 = np.where(self.DS_DF.type == 1)[0]
@@ -546,9 +571,26 @@ class DS_CSDWindow(QtWidgets.QDialog):
             self.idx_ds1   = None
             self.idx_ds2   = None
         
+    def interp_data(self):
+        noise_idx = np.nonzero(self.NOISE_TRAIN)[0]
+        clean_idx = np.setdiff1d(np.arange(len(self.channels)), noise_idx)
+        if len(noise_idx) > 0: print('Interpolating noisy channels...')
+        for i in noise_idx:
+            self.lfp[i,:] = np.nan  # replace noisy channels in lfp with np.nan
+            # replace noisy channels in lfp_interp with average of two closest (clean) signals
+            if i==0: 
+                self.lfp_interp[i,:] = self.lfp_all[min(clean_idx)]
+            elif i > max(clean_idx):
+                self.lfp_interp[i,:] = self.lfp_all[max(clean_idx)]
+            else:
+                sig1 = self.lfp_all[pyfx.Closest(i, clean_idx[clean_idx < i])]
+                sig2 = self.lfp_all[pyfx.Closest(i, clean_idx[clean_idx > i])]
+                self.lfp_interp[i,:] = np.nanmean([sig1, sig2], axis=0)
+                
+        
     def gen_layout(self):
         """ Set up layout """
-        title = f'{os.path.basename(self.ddir)} (probe={self.iprb})'
+        title = f'{os.path.basename(self.ddir)} (probe={self.iprb}, shank={self.ishank})'
         self.setWindowTitle(title)
         self.layout = QtWidgets.QHBoxLayout(self)
         
@@ -561,7 +603,7 @@ class DS_CSDWindow(QtWidgets.QDialog):
         self.fig_container.setChildrenCollapsible(False)
         
         # FIGURE 0: Interactive CSD window
-        self.fig0 = IFigCSD(init_min=self.theta_chan, init_max=len(self.channels)-1,
+        self.fig0 = IFigCSD(init_min=self.rel_theta_chan, init_max=len(self.channels)-1,
                             nch=len(self.channels))
         self.canvas0 = FigureCanvas(self.fig0)
         self.canvas0.setMinimumWidth(100)
@@ -574,7 +616,7 @@ class DS_CSDWindow(QtWidgets.QDialog):
         
         
         # scatterplot of PC1 vs PC2
-        self.fig27 = IFigPCA(self.DS_DF, self.PARAMS)
+        self.fig27 = IFigPCA(self.DS_DF, self.CSD_PARAMS['clus_algo'])
         self.fig27.set_tight_layout(True)
         self.canvas27 = FigureCanvas(self.fig27)
         self.canvas27.setMinimumWidth(100)
@@ -609,7 +651,7 @@ class DS_CSDWindow(QtWidgets.QDialog):
         self.widget = DS_CSDWidget()
         self.widget.setMaximumWidth(250)
         self.widget.update_ch_win(self.fig0.slider.val)
-        self.widget.update_gui_from_ddict(self.PARAMS)
+        self.widget.update_gui_from_ddict(self.CSD_PARAMS)
         
         # navigation toolbar
         # self.toolbar = NavigationToolbar(self.canvas0, self)
@@ -625,6 +667,7 @@ class DS_CSDWindow(QtWidgets.QDialog):
         self.fig0.slider.on_changed(self.widget.update_ch_win)
         self.widget.go_btn.clicked.connect(self.calculate_csd)
         self.widget.save_btn.clicked.connect(self.save_csd)
+        self.widget.save_df_btn.clicked.connect(self.save_classification)
         
     def get_csd(self, channels, idx, ddict):
         csd_lfp = self.lfp_interp[channels, :][:, idx]
@@ -641,6 +684,10 @@ class DS_CSDWindow(QtWidgets.QDialog):
     
     def calculate_csd(self, btn=None, twin=0.05, twin2=0.1):
         """ Current source density (CSD) analysis """
+        if self.fig27.chks.get_status()[0]==True:
+            self.fig27.chks.set_active(0)
+        self.widget.save_df_btn.setEnabled(False)
+        
         self.csd_chs = np.array(self.widget.csd_chs)
         ddict = self.widget.ddict_from_gui()
         
@@ -665,7 +712,8 @@ class DS_CSDWindow(QtWidgets.QDialog):
         self.mean_csds_2 = self.get_csd_surround(self.csd_chs, self.idx_ds2, ddict, twin=twin)
         
         # update params, allow save
-        self.PARAMS.update(**ddict)
+        #ffindme
+        self.CSD_PARAMS.update(**ddict)
         self.widget.save_btn.setEnabled(True)
         
         # plot new CSDs, hide window
@@ -677,8 +725,9 @@ class DS_CSDWindow(QtWidgets.QDialog):
         # plot PCA scatterplot
         self.fig27.DS_DF = self.DS_DF
         self.plot_bar.fig27_btn.setEnabled(True)
-        init_btn = ['kmeans','dbscan'].index(self.PARAMS['clus_algo'])
-        self.fig27.plot_ds_pca(self.PARAMS['clus_algo'])
+        alg = str(self.CSD_PARAMS['clus_algo'])
+        init_btn = ['kmeans','dbscan'].index(alg)
+        self.fig27.plot_ds_pca(alg)
         self.fig27.btns.set_active(init_btn)
         
         # plot mean waveforms
@@ -697,9 +746,9 @@ class DS_CSDWindow(QtWidgets.QDialog):
             else:
                 _ = self.fig0.ax.plot(xax, -y+irow, color='black', lw=2)[0]
         self.fig0.ax.invert_yaxis()
-        self.fig0.ax.lines[self.hil_chan].set(color='red', lw=3)
-        self.fig0.ax.lines[self.ripple_chan].set(color='green', lw=3)
-        self.fig0.ax.lines[self.theta_chan].set(color='blue', lw=3)
+        self.fig0.ax.lines[self.rel_hil_chan].set(color='red', lw=3)
+        self.fig0.ax.lines[self.rel_ripple_chan].set(color='green', lw=3)
+        self.fig0.ax.lines[self.rel_theta_chan].set(color='blue', lw=3)
         self.fig0.set_tight_layout(True)
         sns.despine(self.fig0)
         self.canvas0.draw_idle()
@@ -748,8 +797,8 @@ class DS_CSDWindow(QtWidgets.QDialog):
         iwin = int(round(twin*self.lfp_fs))
         xax = np.linspace(-twin, twin, self.mean_csds_1[0].shape[1])
         
-        self.ds1_arr = np.array(ephys.getwaves(self.lfp[self.hil_chan], self.idx_ds1, iwin))
-        self.ds2_arr = np.array(ephys.getwaves(self.lfp[self.hil_chan], self.idx_ds2, iwin))
+        self.ds1_arr = np.array(ephys.getwaves(self.lfp[self.rel_hil_chan], self.idx_ds1, iwin))
+        self.ds2_arr = np.array(ephys.getwaves(self.lfp[self.rel_hil_chan], self.idx_ds2, iwin))
         
         def rowplot(i, arr, csd, csd_lfp):
             ax1_w, ax1_c = self.type_axs[:,i]
@@ -817,23 +866,76 @@ class DS_CSDWindow(QtWidgets.QDialog):
         
     def save_csd(self):
         """ Write CSDs to .npz file, save classifications in DS_DF  """
+        # update param dictionary with current plotted clustering algorithm
+        name = self.fig27.btns.value_selected
+        (col,alg) = ('k_type','kmeans') if name=='K-means' else ('db_type','dbscan')
+        self.DS_DF['type'] = self.DS_DF[col]
+        self.CSD_PARAMS['clus_algo'] = alg
+        
+        # probe channel used to calculate CSD
+        hil_chan = int(np.atleast_1d(self.DS_DF.ch.values)[0])
         # save raw, filtered, and normalized CSDs
         csd_path = Path(self.ddir, f'ds_csd_{self.iprb}.npz')
-        np.savez(csd_path, raw_csd = self.raw_csd,
-                           filt_csd = self.filt_csd,
-                           norm_filt_csd = self.norm_filt_csd,
-                           csd_chs = self.csd_chs)
+        if not os.path.exists(csd_path):
+            np.savez(csd_path)  # initialize NPZ file
+        with np.load(csd_path, allow_pickle=True) as npz_dict:
+            npz_dict = dict(npz_dict)
+            npz_dict[str(self.ishank)] = dict(raw_csd = self.raw_csd,
+                                              filt_csd = self.filt_csd,
+                                              norm_filt_csd = self.norm_filt_csd,
+                                              csd_chs = self.csd_chs)
+            # save CSD parameters
+            npz_dict[str(self.ishank) + '_params'] = np.array([self.CSD_PARAMS])
+            np.savez(csd_path, **npz_dict)
         
+        # update DS dataframe with PCA values/DS types for current shank
+        current_df = ephys.load_ds_dataset(self.ddir, self.iprb, ishank=-1)
+        ch_index = np.atleast_1d(current_df.ch.values)
+        current_df.set_index(ch_index, inplace=True)
+        for col,plc in zip(self.pca_cols, self.placeholders):
+            if col not in current_df.columns:
+                current_df[col] = plc
+            current_df.loc[hil_chan, col] = np.array(self.DS_DF[col])
         # save DS dataframe with PCA values/DS types
-        self.DS_DF.to_csv(Path(self.ddir, f'DS_DF_{self.iprb}'), index_label=False)
-        ephys.save_recording_params(self.ddir, self.PARAMS)  # save params
+        new_df = current_df.reset_index(drop=True)
+        new_df.to_csv(Path(self.ddir, f'DS_DF_{self.iprb}'), index_label=False)
+        #self.DS_DF.to_csv(Path(self.ddir, f'DS_DF_{self.iprb}'), index_label=False)
+        #ephys.save_recording_params(self.ddir, self.PARAMS)  # save params
         
         # pop-up messagebox appears when save is complete
         msgbox = gi.MsgboxSave('CSD data saved!\nExit window?', parent=self)
         res = msgbox.exec()
         if res == QtWidgets.QMessageBox.Yes:
             self.accept()
+        self.widget.save_df_btn.setEnabled(True)
     
+    
+    def save_classification(self):
+        # update param dictionary with current plotted clustering algorithm
+        name = self.fig27.btns.value_selected
+        (col,alg) = ('k_type','kmeans') if name=='K-means' else ('db_type','dbscan')
+        self.DS_DF['type'] = self.DS_DF[col]
+        self.CSD_PARAMS['clus_algo'] = alg
+        # save current clustering algorithm in npz file
+        csd_path = Path(self.ddir, f'ds_csd_{self.iprb}.npz')
+        with np.load(csd_path, allow_pickle=True) as npz_dict:
+            npz_dict = dict(npz_dict)
+            npz_dict[str(self.ishank) + '_params'] = np.array([self.CSD_PARAMS])
+            np.savez(csd_path, **npz_dict)
+        
+        # probe channel used to calculate CSD
+        hil_chan = int(np.atleast_1d(self.DS_DF.ch.values)[0])
+        current_df = ephys.load_ds_dataset(self.ddir, self.iprb, ishank=-1)
+        ch_index = np.atleast_1d(current_df.ch.values)
+        current_df.set_index(ch_index, inplace=True)
+        for col_name in ['k_type','db_type','type']:
+            current_df.loc[hil_chan, col_name] = np.array(self.DS_DF[col_name])
+        new_df = current_df.reset_index(drop=True)
+        new_df.to_csv(Path(self.ddir, f'DS_DF_{self.iprb}'), index_label=False)
+        
+        msgbox = gi.MsgboxSave('Current DS classification saved to file!', parent=self)
+        msgbox.setStandardButtons(QtWidgets.QMessageBox.Ok)
+        _ = msgbox.exec()
     
     def closeEvent(self, event):
         plt.close()
@@ -845,9 +947,12 @@ if __name__ == '__main__':
     #         'JG007_2_2024-07-09_15-40-43_openephys/Record Node 103/experiment1/recording1')
     #ddir = ('/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/saved_data/JG008')
     #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/stanford/JF513_saved'
-    ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/saved_data/neuralynx_saved'
+    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/saved_data/neuralynx_saved'
+    
+    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/5XFAD_raw/multishank/processed_data_alternating'
+    ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/5XFAD_raw/JG068_3/processed_data_15s'
     pyfx.qapp()
-    w = DS_CSDWindow(ddir, 0)
+    w = DS_CSDWindow(ddir, iprb=0, ishank=0)
     w.show()
         
     #w.show()
