@@ -564,6 +564,8 @@ class AnalysisBtns(QtWidgets.QWidget):
         
         if not os.path.isdir(ddir):
             return
+        if not os.path.isfile(Path(ddir, 'probe_group')):
+            return
         
         files = os.listdir(ddir)
         # required: basic LFP files

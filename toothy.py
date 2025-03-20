@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 import numpy as np
 import pandas as pd
-from PyQt5 import QtWidgets
+from PyQt5 import QtWidgets, QtCore
 import probeinterface as prif
 import pdb
 # set app folder as working directory
@@ -27,6 +27,8 @@ from channel_selection_gui import ChannelSelectionWindow
 from ds_classification_gui import DS_CSDWindow
     
 class toothy(QtWidgets.QMainWindow):
+    resize_signal = QtCore.pyqtSignal(object)
+    
     def __init__(self):
         super().__init__()
         # load base data directories
@@ -38,6 +40,7 @@ class toothy(QtWidgets.QMainWindow):
         self.init_processed_ddir = str(data_path)
         
         self.gen_layout()
+        self.connect_signals()
         
         self.basedirs_popup   = None
         self.parameters_popup = None
@@ -106,13 +109,6 @@ class toothy(QtWidgets.QMainWindow):
         self.analyze_btn = QtWidgets.QPushButton('Analyze data')
         self.analyze_btn.setStyleSheet(mode_btn_ss)
         
-        # connect to functions
-        self.base_folder_btn.clicked.connect(self.base_folder_popup)
-        self.view_params_btn.clicked.connect(self.view_param_popup)
-        self.probe_btn.clicked.connect(self.probe_popup)
-        self.process_btn.clicked.connect(self.raw_data_popup)
-        self.analyze_btn.clicked.connect(self.processed_data_popup)
-        
         self.centralLayout.addWidget(self.base_folder_btn)
         self.centralLayout.addWidget(self.view_params_btn)
         self.centralLayout.addWidget(self.probe_btn)
@@ -121,11 +117,21 @@ class toothy(QtWidgets.QMainWindow):
         
         self.setCentralWidget(self.centralWidget)
     
+    def connect_signals(self):
+        """ Connect widgets to functions """
+        self.base_folder_btn.clicked.connect(self.base_folder_popup)
+        self.view_params_btn.clicked.connect(self.view_param_popup)
+        self.probe_btn.clicked.connect(self.probe_popup)
+        self.process_btn.clicked.connect(self.raw_data_popup)
+        self.analyze_btn.clicked.connect(self.processed_data_popup)
+        self.resize_signal.connect(lambda win: QtCore.QTimer.singleShot(50, win.adjustSize))
+    
     def base_folder_popup(self):
         """ View or change base data directories """
         self.basedirs_popup = sp.BaseFolderPopup()
         self.basedirs_popup.setModal(True)
         self.basedirs_popup.show()
+        self.basedirs_popup.path_updated_signal.connect(lambda i: self.resize_signal.emit(self.basedirs_popup))
     
     def view_param_popup(self):
         """ View/edit default parameters """
@@ -144,6 +150,7 @@ class toothy(QtWidgets.QMainWindow):
         self.probeobj_popup = sp.ProbeObjectPopup(probe=init_probe)
         self.probeobj_popup.setModal(True)
         self.probeobj_popup.show()
+        self.resize_signal.emit(self.probeobj_popup)
         
     def raw_data_popup(self, *args, mode=2, init_raw_ddir=''):
         """ Select raw data for processing """
@@ -155,7 +162,7 @@ class toothy(QtWidgets.QMainWindow):
         """ Show processed data options """
         # create popup window for processed data
         self.analysis_popup = sp.ProcessedDirectorySelectionPopup(init_ddir=init_ddir)
-        #self.analysis_popup.setModal(True)
+        self.analysis_popup.setModal(True)
         self.analysis_popup.ab.option1_btn.clicked.connect(self.ch_selection_popup)
         self.analysis_popup.ab.option2_btn.clicked.connect(self.classify_ds_popup)
         self.analysis_popup.show()
@@ -169,8 +176,6 @@ class toothy(QtWidgets.QMainWindow):
         self.ch_selection_dlg = ChannelSelectionWindow(ddir, probe_list=probe_list, 
                                                        iprb=iprb, ishank=ishank)
         self.ch_selection_dlg.setModal(True)
-        self.ch_selection_dlg.show()
-        self.ch_selection_dlg.raise_()
         _ = self.ch_selection_dlg.exec()
         # check for updated files, enable/disable analysis options
         iprb = int(self.ch_selection_dlg.iprb)
@@ -189,8 +194,6 @@ class toothy(QtWidgets.QMainWindow):
             return
         self.classify_ds_dlg = DS_CSDWindow(ddir, iprb=iprb, ishank=ishank)
         self.classify_ds_dlg.setModal(True)
-        self.classify_ds_dlg.show()
-        self.classify_ds_dlg.raise_()
         _ = self.classify_ds_dlg.exec()
         # check for updated files, enable/disable analysis options
         self.analysis_popup.ab.ddir_toggled(ddir, probe_idx=iprb, shank_idx=ishank)
@@ -201,12 +204,18 @@ class toothy(QtWidgets.QMainWindow):
         screen_rect = QtWidgets.QDesktopWidget().screenGeometry()
         qrect.moveCenter(screen_rect.center())  # move center of qr to center of screen
         self.move(qrect.topLeft())
-
-if __name__ == '__main__':
+        
+        
+def main():
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle('Fusion')
     app.setQuitOnLastWindowClosed(True)
     
-    w = toothy()
-    w.raise_()
+    ToothyWindow = toothy()
+    ToothyWindow.raise_()
+    
     sys.exit(app.exec())
+    
+
+if __name__ == '__main__':
+    main()

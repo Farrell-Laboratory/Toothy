@@ -2149,7 +2149,6 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         # update window title
         title = f'{os.path.basename(self.ddir)}'
         self.setWindowTitle(title)
-        self.show()
     
     def init_data(self, ddir, probe_list, iprb, ishank=0):
         """ Initialize all recording variables """

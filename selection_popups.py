@@ -268,11 +268,14 @@ class ProcessedDirectorySelectionPopup(QtWidgets.QDialog):
             self.probe_group = prif.read_probeinterface(Path(self.ddir, 'probe_group'))
             items = [f'probe {i}' for i in range(len(self.probe_group.probes))]
             self.probe_dropdown.addItems(items)
+            self.probe_dropdown.setEnabled(len(items) > 1)
+            self.update_probe()
         else:
             self.probe_group, self.probe, self.probe_idx = None, None, -1
+            self.ab.ddir_toggled(self.ddir)
+            
         # probe index (e.g. 0,1,...) if directory is valid, otherwise -1
         self.probe_dropdown.blockSignals(False)
-        self.update_probe()
     
     def update_probe(self):
         if self.probe_group is None: return
@@ -284,8 +287,10 @@ class ProcessedDirectorySelectionPopup(QtWidgets.QDialog):
             self.shank_dropdown.removeItem(j)
         items = [f'shank {i}' for i in range(self.probe.get_shank_count())]
         self.shank_dropdown.addItems(items)
+        self.shank_dropdown.setEnabled(len(items) > 1)
         self.shank_dropdown.blockSignals(False)
-        self.update_shank()
+        self.shank_idx = self.shank_dropdown.currentIndex()
+        self.ab.ddir_toggled(self.ddir, probe_idx=self.probe_idx, shank_idx=self.shank_idx)
     
     def update_shank(self):
         self.shank_idx = self.shank_dropdown.currentIndex() # update action widgets
@@ -301,10 +306,11 @@ class ProbeObjectPopup(QtWidgets.QDialog):
         self.accept_btn = self.probegod.accept_btn
         self.accept_btn.setVisible(False)
         self.accept_btn.clicked.connect(self.accept)
+        self.probegod.widget_updated_signal.connect(self.adjustSize)
         
         self.layout = QtWidgets.QVBoxLayout(self)
         self.layout.addWidget(self.probegod)
-        self.layout.setSizeConstraint(QtWidgets.QLayout.SetFixedSize)
+        #self.layout.setSizeConstraint(QtWidgets.QLayout.SetFixedSize)
         self.layout.addWidget(self.accept_btn)
         self.setWindowTitle('Create probe')
     
@@ -327,6 +333,8 @@ class ParamFilePopup(QtWidgets.QDialog):
     
 
 class BaseFolderPopup(QtWidgets.QDialog):
+    path_updated_signal = QtCore.pyqtSignal(int)
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle('Base Folders')
@@ -408,60 +416,22 @@ class BaseFolderPopup(QtWidgets.QDialog):
         paramfile_row1.addWidget(self.paramfile_auto, stretch=0)
         layout.addWidget(self.paramfile_w)
         
+        bbox = QtWidgets.QHBoxLayout()
+        self.save_btn = QtWidgets.QPushButton('Save')
+        self.save_btn.setStyleSheet(blue_btn_ss)
+        self.save_btn.setEnabled(False)
+        bbox.addWidget(self.save_btn)
+        layout.addLayout(bbox)
+        
         self.raw_btn.clicked.connect(lambda: self.choose_base_ddir(0))
         self.probe_btn.clicked.connect(lambda: self.choose_base_ddir(1))
         self.probefile_btn.clicked.connect(self.choose_probe_file)
         self.paramfile_btn.clicked.connect(self.choose_param_file)
         self.probefile_clear.clicked.connect(self.clear_probe_file)
         self.paramfile_auto.clicked.connect(self.auto_param_file)
-        
-        bbox = QtWidgets.QHBoxLayout()
-        self.save_btn = QtWidgets.QPushButton('Save')
-        self.save_btn.setStyleSheet(blue_btn_ss)
-        self.save_btn.setEnabled(False)
-        #self.save_btn.setStyleSheet('QPushButton {padding : 10px;}')
-        bbox.addWidget(self.save_btn)
-        layout.addLayout(bbox)
-        
+        self.path_updated_signal.connect(lambda i: self.update_base_ddir(i))
         self.save_btn.clicked.connect(self.save_base_folders)
-            
-        # get base folder widgets, put code tags around font
-        QtCore.QTimer.singleShot(10, self.center_window)
-        
-    def center_window(self):
-        qrect = self.frameGeometry()  # proxy rectangle for window with frame
-        screen_rect = pyfx.ScreenRect()
-        qrect.moveCenter(screen_rect.center())  # move center of qr to center of screen
-        self.move(qrect.topLeft())
     
-    def choose_probe_file(self):
-        probe, fpath = gi.FileDialog.load_file(filetype='probe',
-                                               init_ddir=str(self.BASE_FOLDERS[1]))
-        if probe is not None:
-            self.BASE_FOLDERS[2] = str(fpath)
-            self.update_base_ddir(2)
-            self.save_btn.setEnabled(True)
-        
-    def clear_probe_file(self):
-        self.BASE_FOLDERS[2] = ''
-        self.update_base_ddir(2)
-        self.save_btn.setEnabled(True)
-            
-    def choose_param_file(self):
-        param_dict, fpath = gi.FileDialog.load_file(filetype='param')
-        if param_dict is not None:
-            self.BASE_FOLDERS[3] = str(fpath)
-            self.update_base_ddir(3)
-            self.save_btn.setEnabled(True)
-    
-    def auto_param_file(self):
-        fpath = gi.FileDialog.save_file(qparam.get_original_defaults(), filetype='param',
-                                        init_ddir=os.getcwd(), init_fname='default_params.txt')
-        if fpath:
-            self.BASE_FOLDERS[3] = str(fpath)
-            self.update_base_ddir(3)
-            self.save_btn.setEnabled(True)
-        
     def choose_base_ddir(self, i):
         init_ddir = str(self.BASE_FOLDERS[i])
         fmt = 'Base folder for %s'
@@ -472,8 +442,41 @@ class BaseFolderPopup(QtWidgets.QDialog):
         res = dlg.exec()
         if res:
             self.BASE_FOLDERS[i] = str(dlg.directory().path())
-            self.update_base_ddir(i)
-            self.save_btn.setEnabled(True)
+            #self.save_btn.setEnabled(True)
+            self.path_updated_signal.emit(i)
+            #self.update_base_ddir(i)
+    
+    def choose_probe_file(self):
+        probe, fpath = gi.FileDialog.load_file(filetype='probe',
+                                               init_ddir=str(self.BASE_FOLDERS[1]))
+        if probe is not None:
+            self.BASE_FOLDERS[2] = str(fpath)
+            #self.save_btn.setEnabled(True)
+            self.path_updated_signal.emit(2)
+            #self.update_base_ddir(2)
+        
+    def clear_probe_file(self):
+        self.BASE_FOLDERS[2] = ''
+        #self.save_btn.setEnabled(True)
+        self.path_updated_signal.emit(2)
+        #self.update_base_ddir(2)
+            
+    def choose_param_file(self):
+        param_dict, fpath = gi.FileDialog.load_file(filetype='param')
+        if param_dict is not None:
+            self.BASE_FOLDERS[3] = str(fpath)
+            #self.save_btn.setEnabled(True)
+            self.path_updated_signal.emit(3)
+            #self.update_base_ddir(3)
+    
+    def auto_param_file(self):
+        fpath = gi.FileDialog.save_file(qparam.get_original_defaults(), filetype='param',
+                                        init_ddir=os.getcwd(), init_fname='default_params.txt')
+        if fpath:
+            self.BASE_FOLDERS[3] = str(fpath)
+            #self.save_btn.setEnabled(True)
+            self.path_updated_signal.emit(3)
+            #self.update_base_ddir(3)
             
     def update_base_ddir(self, i):
         fmt = '<code>{}</code>'
@@ -485,6 +488,7 @@ class BaseFolderPopup(QtWidgets.QDialog):
             self.probefile_qlabel.setText(fmt.format(self.BASE_FOLDERS[2]))
         elif i==3:
             self.paramfile_qlabel.setText(fmt.format(self.BASE_FOLDERS[3]))
+        self.save_btn.setEnabled(True)
     
     def save_base_folders(self):
         ddir_list = list(self.BASE_FOLDERS)
@@ -969,34 +973,6 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         res = msgbox.exec()
         if res == QtWidgets.QMessageBox.Yes:
             self.accept()
-        
-    
-    # def view_param_popup(self):
-    #     """ View default parameters """
-    #     params = ephys.read_param_file()
-    #     keys, vals = zip(*params.items())
-    #     vstr = [*map(str,vals)]
-    #     klens = [*map(len, keys)]; kmax=max(klens)
-    #     padk = [*map(lambda k: k + '_'*(kmax-len(k))+':', keys)]
-    #     html = ['<pre>'+k+v+'</pre>' for k,v in zip(padk,vstr)]
-    #     text = '<h3><tt>DEFAULT PARAMETERS</tt></h3>' + '<hr>' + ''.join(html)
-    #     textwidget = QtWidgets.QTextEdit(text)
-    #     # create popup window for text widget
-    #     dlg = QtWidgets.QDialog(self)
-    #     lay = QtWidgets.QVBoxLayout(dlg)
-    #     lay.addWidget(textwidget)
-    #     qrect = pyfx.ScreenRect(perc_height=0.5, perc_width=0.3, keep_aspect=False)
-    #     dlg.setGeometry(qrect)
-    #     dlg.show()
-    #     dlg.raise_()
-            
-            
-    def center_window(self):
-        qrect = self.frameGeometry()  # proxy rectangle for window with frame
-        screen_rect = pyfx.ScreenRect()
-        qrect.moveCenter(screen_rect.center())  # move center of qr to center of screen
-        self.move(qrect.topLeft())
-        
     
     def load_array(self):
         # open file, load data array
@@ -1042,7 +1018,7 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         self.ddir_gbox.setEnabled(False)
         for btn in [self.oe_radio, self.nn_radio, self.nl_radio, self.manual_radio]:
             btn.setStyleSheet('QRadioButton:disabled {color : gray;}')
-        QtCore.QTimer.singleShot(10, self.center_window)
+        
         
     def update_probe_config(self):
         x = bool(self.tort.tort_btn.isEnabled())
