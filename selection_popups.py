@@ -306,13 +306,16 @@ class ProbeObjectPopup(QtWidgets.QDialog):
         self.accept_btn = self.probegod.accept_btn
         self.accept_btn.setVisible(False)
         self.accept_btn.clicked.connect(self.accept)
-        self.probegod.widget_updated_signal.connect(self.adjustSize)
+        self.probegod.widget_updated_signal.connect(self.adjust_the_size)
         
         self.layout = QtWidgets.QVBoxLayout(self)
         self.layout.addWidget(self.probegod)
         #self.layout.setSizeConstraint(QtWidgets.QLayout.SetFixedSize)
         self.layout.addWidget(self.accept_btn)
         self.setWindowTitle('Create probe')
+        
+    def adjust_the_size(self):
+        QtCore.QTimer.singleShot(10, lambda: self.adjustSize())
     
 
 class ParamFilePopup(QtWidgets.QDialog):

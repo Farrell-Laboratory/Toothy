@@ -1557,13 +1557,17 @@ class MsgboxParams(Msgbox):
         
 class ParamSettings(QtWidgets.QDialog):
     SAVE_LOCATION = None
-    def __init__(self, ddict=None, parent=None):
+    def __init__(self, ddict=None, hide_params=['el_shape','el_area','el_h'], parent=None):
         super().__init__(parent)
         if ddict is None:
             ddict = ephys.read_params()
         
         # initialize parameter input widget
         self.main_widget = qparam.ParamObject(ddict)
+        for param in hide_params:
+            if param in self.main_widget.ROWS.keys():
+                self.main_widget.ROWS[param].hide()
+        
         self.PARAMS, _ = self.main_widget.ddict_from_gui()
         self.PARAMS_ORIG = dict(self.PARAMS)
         
