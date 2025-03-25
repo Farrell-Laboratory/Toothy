@@ -75,7 +75,7 @@ The probe designer uses the ```probeinterface``` Python package to create a soft
   
 4) Set the electrode contact shape (circles, squares, or rectangles) and size (area/radius/width/height).
 
-<br><br><br>
+<br><br>
 
 **<ins>"Paste"</ins>**
 <p align="center"><img align="left", src="_img/probe_builder2.png" width=30%/></p>
