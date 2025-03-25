@@ -176,10 +176,14 @@ class toothy(QtWidgets.QMainWindow):
         self.ch_selection_dlg = ChannelSelectionWindow(ddir, probe_list=probe_list, 
                                                        iprb=iprb, ishank=ishank)
         self.ch_selection_dlg.setModal(True)
-        _ = self.ch_selection_dlg.exec()
-        # check for updated files, enable/disable analysis options
-        iprb = int(self.ch_selection_dlg.iprb)
-        ishank = int(self.ch_selection_dlg.ishank)
+        res = self.ch_selection_dlg.exec()
+        if res:
+            # update current probe and shank from GUI
+            iprb = int(self.ch_selection_dlg.iprb)
+            ishank = int(self.ch_selection_dlg.ishank)
+            self.analysis_popup.probe_dropdown.setCurrentIndex(iprb)
+            self.analysis_popup.shank_dropdown.setCurrentIndex(ishank)
+        # always check for updated files, enable/disable analysis options
         self.analysis_popup.ab.ddir_toggled(ddir, probe_idx=iprb, shank_idx=ishank)
     
     def classify_ds_popup(self):

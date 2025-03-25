@@ -215,8 +215,9 @@ class IFigLFP(QtWidgets.QWidget):
                 
                 ### timepoint section
                 menu.addAction(t_hdr)
-                # copy timestamp to clipboard
-                copyTAction = menu.addAction('Copy timepoint')
+                # copy timestamp or recording index to clipboard
+                copyTAction = menu.addAction('Copy time point')
+                copyIAction = menu.addAction('Copy index')
                 
                 ### channel section
                 menu.addAction(ch_hdr)
@@ -228,6 +229,8 @@ class IFigLFP(QtWidgets.QWidget):
                 res = menu.exec_(event.guiEvent.globalPos())
                 if res == copyTAction:
                     QtWidgets.QApplication.clipboard().setText(str(tpoint))
+                elif res == copyIAction:
+                    QtWidgets.QApplication.clipboard().setText(str(idx))
                 elif res == noiseAction:
                     # switch channel designation between "clean" and "noisy"
                     new_noise_train = np.array(self.NOISE_TRAIN)
@@ -664,16 +667,6 @@ class IFigLFP(QtWidgets.QWidget):
                     self.ax.axvline(ds_time, color='red', lw=2, ls='--', zorder=-5, alpha=0.4)
                     
         if self.SHOW_SWR:
-            # swr_ii = np.where(self.SWR_train[idx] != 0)[0]
-            
-            # for swr_time, status in zip(x[swr_ii], self.SWR_train[idx][swr_ii]):
-            #     if status == 1:
-            #         self.ax.axvline(swr_time, color='green', lw=2, zorder=-5, alpha=0.4)
-            #     elif status == 2:
-            #         self.ax.axvline(swr_time, color='green', lw=2, ls=':', zorder=-5, alpha=0.4)
-            #     elif self.SHOW_SWR_RM:
-            #         self.ax.axvline(swr_time, color='green', lw=2, ls='--', zorder=-5, alpha=0.4)
-            
             swr_times = x[np.where(self.SWR_train[idx] > 0)[0]]
             for swrt in swr_times:
                 self.ax.axvline(swrt, color='green', zorder=-5, alpha=0.4)
@@ -1158,7 +1151,7 @@ class IFigDS(IFigEvent):
     SHOW_WH = False
     
     FLAG = 0
-    annot_dict = dict(time='{time:.2f} s', amp='{amp:.2f} mV', asym='{asym:+.0f} \%', 
+    annot_dict = dict(time='{time:.2f} s', amp='{amp:.2f} mV', asym='{asym:+.0f}%', 
                       half_width='{half_width:.2f} ms', width_height='{width_height:.2f} mV')
     
     def create_subplots(self, **kwargs):
@@ -1500,7 +1493,7 @@ class EventViewWidget(QtWidgets.QFrame):
         data_lay.addWidget(data_line0)
         
         ### channel comparison widget
-        self.ch_comp_widget = gi.AddChannelWidget()
+        self.ch_comp_widget = gi.AddChannelWidget(add_btn_pos='left')
         data_lay.addWidget(self.ch_comp_widget)
         self.vlay.addWidget(self.data_gbox)
         
@@ -1652,6 +1645,7 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         ###   FREQUENCY POWER BANDS   ###
         
         self.plot_freq_pwr = gi.ShowHideBtn(init_show=False)
+        self.plot_freq_pwr.setAutoDefault(False)
         #self.plot_freq_pwr.setStyleSheet('QPushButton {padding : 5px 10px;}')
         self.plot_freq_pwr.setStyleSheet('QPushButton {'
                                           'background-color : whitesmoke;'
@@ -1692,6 +1686,7 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         # buttons
         ds_row2 = QtWidgets.QHBoxLayout()
         self.ds_event_btn = QtWidgets.QPushButton('View DS')
+        self.ds_event_btn.setAutoDefault(False)
         ds_row2.addWidget(self.ds_event_btn)
         
         ds_row3 = QtWidgets.QVBoxLayout()
@@ -1736,6 +1731,7 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         # buttons
         swr_row2 = QtWidgets.QHBoxLayout()
         self.swr_event_btn = QtWidgets.QPushButton('View ripples')
+        self.swr_event_btn.setAutoDefault(False)
         swr_row2.addWidget(self.swr_event_btn)
         swr_row3 = QtWidgets.QVBoxLayout()
         swr_row3_0 = QtWidgets.QHBoxLayout()
@@ -1799,6 +1795,7 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         for show_btn in [self.ds_show, self.swr_show]:
             show_btn.setCheckable(True)
             show_btn.setChecked(True)
+            show_btn.setAutoDefault(False)
             show_btn.setStyleSheet('QPushButton {'
                                    'background-color : whitesmoke;'
                                    'border : 2px outset gray;'
@@ -1832,7 +1829,7 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         self.tab2.setFrameShadow(QtWidgets.QFrame.Raised)
         self.tab2.setLineWidth(2)
         self.tab2.setMidLineWidth(2)
-        self.tab_widget.addTab(self.tab2, 'Notes')
+        self.tab_widget.addTab(self.tab2, 'Recording')
         self.vlay2 = QtWidgets.QVBoxLayout(self.tab2)
         self.vlay2.setSpacing(10)
         
@@ -1848,15 +1845,8 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         time_lay.setContentsMargins(0,0,0,0)
         self.tjump = gi.LabeledSpinbox('Time', double=True, orientation='h', range=trange, spacing=5)
         self.ijump = gi.LabeledSpinbox('Index', orientation='h', range=irange, spacing=5)
-        icon = self.style().standardIcon(QtWidgets.QStyle.SP_ArrowForward)
-        jbtns = [self.tjump_btn, self.ijump_btn] = [QtWidgets.QPushButton(), 
-                                                    QtWidgets.QPushButton()]
-        for btn in jbtns:
-            btn.setIcon(icon)
-            btn.setMaximumWidth(btn.minimumSizeHint().height())
-            btn.setFlat(True)
-        self.tjump.layout.addWidget(self.tjump_btn)
-        self.ijump.layout.addWidget(self.ijump_btn)
+        self.tjump.qw.setKeyboardTracking(False)
+        self.ijump.qw.setKeyboardTracking(False)
         time_lay.addWidget(self.tjump)
         time_lay.addWidget(self.ijump)
         time_gbox_lay.addWidget(self.time_w)
@@ -1997,7 +1987,7 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         self.debug_btn.setDefault(False)
         self.debug_btn.setAutoDefault(False)
         bbox.addWidget(self.save_btn)
-        bbox.addWidget(self.debug_btn)
+        #bbox.addWidget(self.debug_btn)
         
         self.settings_layout.addLayout(qlist_hlay, stretch=0)  # NEWSHANK
         self.settings_layout.addWidget(self.tab_widget, stretch=2)
@@ -2350,8 +2340,8 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         self.widget.swr_show.toggled.connect(self.show_hide_events)
         self.widget.swr_show_rm.toggled.connect(self.show_hide_events)
         # show given index/timepoint
-        self.widget.tjump_btn.clicked.connect(lambda: self.main_fig.point_jump(self.widget.tjump.value(), 't'))
-        self.widget.ijump_btn.clicked.connect(lambda: self.main_fig.point_jump(self.widget.ijump.value(), 'i'))
+        self.widget.tjump.qw.valueChanged.connect(lambda x: self.main_fig.point_jump(x, 't'))
+        self.widget.ijump.qw.valueChanged.connect(lambda x: self.main_fig.point_jump(x, 'i'))
         # show next/previous event
         self.widget.ds_arrows.bgrp.idClicked.connect(lambda x: self.main_fig.event_jump(x, 'ds'))
         self.widget.swr_arrows.bgrp.idClicked.connect(lambda x: self.main_fig.event_jump(x, 'swr'))
@@ -2550,22 +2540,6 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         PROBE_DS_ALL.to_csv(Path(self.ddir, f'DS_DF_{self.iprb}'), index_label=False)
         PROBE_SWR_ALL.to_csv(Path(self.ddir, f'SWR_DF_{self.iprb}'), index_label=False)
         
-        # save specific event DFs for current probe and shank
-        #event_channels = [theta_chan, ripple_chan, hil_chan] = self.event_channel_list[self.iprb][self.ishank] # NEWSHANK
-        # if hil_chan in self.DS_ALL.ch:
-        #     DS_DF = pd.DataFrame(self.DS_ALL.loc[hil_chan])
-        # else: 
-        #     DS_DF = pd.DataFrame(columns=self.DS_ALL.columns)
-        # if ripple_chan in self.SWR_ALL.ch: 
-        #     SWR_DF = pd.DataFrame(self.SWR_ALL.loc[ripple_chan])
-        # else: 
-        #     SWR_DF = pd.DataFrame(columns=self.SWR_ALL.columns)
-        # SWR_DF.to_csv(Path(self.ddir, f'SWR_DF_probe{self.iprb}_shank{self.ishank}'), index_label=False)
-        # DS_DF.to_csv(Path(self.ddir, f'DS_DF_probe{self.iprb}_shank{self.ishank}'), index_label=False)
-        
-        # # save event channels for current probe and shank
-        # np.save(Path(self.ddir, f'theta_ripple_hil_chan_probe{self.iprb}_shank{self.ishank}.npy'), event_channels)
-        
         # save noise annotation for current probe
         np.save(Path(self.ddir, 'noise_channels.npy'), self.noise_list)
         
@@ -2600,23 +2574,3 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
     def debug(self):
         pdb.set_trace()
 
-
-if __name__ == '__main__':
-    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/5XFAD_raw/JG068_3/processed_data_15s/'
-    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/5XFAD_raw/multishank/processed_data_2probe'
-    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/5XFAD_raw/multishank/processed_data_dev_idx'
-    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/5XFAD_raw/multishank/processed_data_probe0_3shank_probe1_2shank'
-    ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/5XFAD_raw/multishank/processed_data_alternating'
-    
-    pyfx.qapp()
-    #w = hippos()
-    probe_group = prif.read_probeinterface(Path(ddir, 'probe_group'))
-            
-    w = ChannelSelectionWindow(ddir, probe_group.probes, 0)
-   #w.widget.ds_event_btn.click()
-    
-    w.show()
-    w.raise_()
-    w.exec()
-
-        

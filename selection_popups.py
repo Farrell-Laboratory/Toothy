@@ -523,12 +523,13 @@ class BaseFolderPopup(QtWidgets.QDialog):
 
 
 class RawArrayPopup(QtWidgets.QDialog):
-    def __init__(self, data, parent=None):
+    def __init__(self, data, filename='', parent=None):
         super().__init__(parent)
         self.data = data
         
         self.gen_layout()
         self.connect_signals()
+        self.setWindowTitle(filename)
         
     def gen_layout(self):
         self.layout = QtWidgets.QVBoxLayout(self)
@@ -629,9 +630,9 @@ class RawArrayPopup(QtWidgets.QDialog):
         super().accept()
     
     @classmethod
-    def run(cls, data, default_fs=1000, parent=None):
+    def run(cls, data, default_fs=1000, filename='', parent=None):
         # launch popup with loaded data
-        dlg = cls(data, parent=parent)
+        dlg = cls(data, filename=filename, parent=parent)
         dlg.fs_w.setValue(default_fs)
         dlg.show()
         dlg.raise_()
@@ -981,14 +982,15 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         # open file, load data array
         data, fpath = gi.FileDialog.load_file(filetype='array', parent=self)
         if data is None: return
+        fname = os.path.basename(fpath)
         # launch popup to ask for context
-        ddict = RawArrayPopup.run(data, default_fs=1000, parent=self)
+        ddict = RawArrayPopup.run(data, default_fs=1000, filename=fname, parent=self)
         if ddict:
             self.RAW_ARRAY = ddict['data']  # load oriented data and FS from popup
             self.RAW_ARRAY_FS = ddict['fs'] # confirm filepath
             self.RAW_ARRAY_UNITS = ddict['units']
             self.raw_ddir = os.path.dirname(fpath)
-            self.manual_upload_flabel.setText(os.path.basename(fpath))
+            self.manual_upload_flabel.setText(fname)
             self.update_raw_ddir()
     
     def load_data(self):
@@ -1021,6 +1023,7 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         self.ddir_gbox.setEnabled(False)
         for btn in [self.oe_radio, self.nn_radio, self.nl_radio, self.manual_radio]:
             btn.setStyleSheet('QRadioButton:disabled {color : gray;}')
+        self.setWindowTitle('Map to probe(s)')
         
         
     def update_probe_config(self):
@@ -1281,7 +1284,7 @@ class tort(QtWidgets.QWidget):
     def connect_signals(self):
         """ Connect widgets to functions """
         self.load_prb.clicked.connect(self.load_probe_from_file)
-        self.create_prb.clicked.connect(self.design_probe) # ffindme
+        self.create_prb.clicked.connect(self.design_probe)
         self.view_assignments_btn.clicked.connect(self.view_data_assignments)
         self.block_radio.toggled.connect(self.switch_index_mode)
     

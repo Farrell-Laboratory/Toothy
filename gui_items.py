@@ -280,6 +280,7 @@ class EventArrows(QtWidgets.QWidget):
         self.setStyleSheet('QPushButton {font-weight:bold; padding:2px;}')
         self.left = QtWidgets.QPushButton('\u2190') # unicode ← and →
         self.right = QtWidgets.QPushButton('\u2192')
+        _ = [btn.setAutoDefault(False) for btn in [self.left, self.right]]
         hbox = QtWidgets.QHBoxLayout(self)
         hbox.setSpacing(1)
         hbox.setContentsMargins(0,0,0,0)
@@ -616,9 +617,6 @@ class AddChannelWidget(QtWidgets.QWidget):
         # set arrow icon direction
         fmt = 'QtWidgets.QWidget().style().standardIcon(QtWidgets.QStyle.SP_Arrow%s)'
         icon = eval(fmt % {'left':'Back','right':'Forward'}[add_btn_pos])
-        
-        #ffindme
-        
         self.add_btn.setIcon(icon)
         self.add_btn.setIconSize(QtCore.QSize(18,18))
         self.clear_btn = QtWidgets.QPushButton('Clear channels')
@@ -651,19 +649,19 @@ class AddChannelWidget(QtWidgets.QWidget):
 
 
 class TableWidget(QtWidgets.QTableWidget):
-    def __init__(self, df, parent=None):
+    def __init__(self, df, static_columns=[], parent=None):
         super().__init__(parent)
+        self.static_columns = static_columns
         self.load_df(df)
         self.verticalHeader().hide()
         
         self.itemChanged.connect(self.print_update)
     
     def print_update(self, item):
-        print('itemChanged')
         self.df.iloc[item.row(), item.column()] = int(item.text())
         
     
-    def init_table(self, selected_columns = []):
+    def init_table(self, selected_columns=[]):
         nRows = len(self.df.index)
         nColumns = len(selected_columns) or len(self.df.columns)
         self.setRowCount(nRows)
@@ -676,17 +674,22 @@ class TableWidget(QtWidgets.QTableWidget):
         if self.df.empty:
             self.clearContents()
             return
-
+        
+        col_names = list(self.df.columns)
         for row in range(self.rowCount()):
             for col in range(self.columnCount()):
                 item = QtWidgets.QTableWidgetItem(str(self.df.iat[row, col]))
+                if col_names[col] in self.static_columns:
+                    item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable)
                 self.setItem(row, col, item)
         # Enable sorting on the table
         self.setSortingEnabled(True)
         # Enable column moving by drag and drop
         self.horizontalHeader().setSectionsMovable(True)
     
-    def load_df(self, df, selected_columns = []):
+    def load_df(self, df, static_columns=None, selected_columns=[]):
+        if static_columns is not None:
+            self.static_columns = static_columns
         self.df = df
         self.init_table(selected_columns)
     
@@ -715,7 +718,6 @@ class TableWidget(QtWidgets.QTableWidget):
             icol = self.selectedIndexes()[0].column()
             for i,irow in enumerate(range(top_row, bottom_row)):
                 self.setItem(irow, icol, QtWidgets.QTableWidgetItem(vals[i]))
-            print('pasted')
 
 
 class TTabWidget(QtWidgets.QTabWidget):

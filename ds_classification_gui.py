@@ -940,22 +940,3 @@ class DS_CSDWindow(QtWidgets.QDialog):
     def closeEvent(self, event):
         plt.close()
         event.accept()
-
-
-if __name__ == '__main__':
-    # ddir = ('/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/raw_data/'
-    #         'JG007_2_2024-07-09_15-40-43_openephys/Record Node 103/experiment1/recording1')
-    #ddir = ('/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/saved_data/JG008')
-    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/stanford/JF513_saved'
-    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/saved_data/neuralynx_saved'
-    
-    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/5XFAD_raw/multishank/processed_data_alternating'
-    ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/5XFAD_raw/JG068_3/processed_data_15s'
-    pyfx.qapp()
-    w = DS_CSDWindow(ddir, iprb=0, ishank=0)
-    w.show()
-        
-    #w.show()
-    w.raise_()
-    w.exec()
-    #sys.exit(app.exec())
