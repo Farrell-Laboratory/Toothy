@@ -129,9 +129,8 @@ Toothy supports automatic data loading from the following acquisition systems:
 * **<ins>OpenEphys</ins>:** data source must contain a ```structure.oebin``` metadata file
 * **<ins>Neuralynx</ins>:** data source must contain unique ```.ncs``` files for each channel
 
-<p></p>
-<img align="left", src="_img/folder_color.png" width=2%/>&nbsp;: select raw data directory from a supported recording system<br>
-<img align="left", src="_img/load.png" width=2%/>&nbsp;: select raw data file in a supported format (see below)
+<p><img align="left", src="_img/folder_color.png" width=2%/>&nbsp;: select raw data directory from a supported recording system</p>
+<p><img align="left", src="_img/load.png" width=2%/>&nbsp;: select raw data file in a supported format (see below)</p>
 
 ### <ins>Loading Data from a File</ins>
 
@@ -273,13 +272,13 @@ Event boxes are the central hub for setting event channels and analyzing DS and 
 **<ins>Event Channel Assignment</ins>:** users can set each event channel through the *<ins>channel input</ins>* at the top of the corresponding event box. The LFP signals are color-coded to reflect the current event channels for DSs (red), SPW-Rs (green), and theta power (blue), and the central plot displays DS and SPW-R events detected on the specified channel.
 
 <p align="center"><img align="right", src="_img/ds_eventbox.png" width=30%/></p>
-<p align="left"><img align="left", src="_img/reset.png" width=2%/> &nbsp; button: resets the event channel to its initial value</p>
+<p align="left"><img align="left", src="_img/reset.png" width=2%/> button: resets the event channel to its initial value</p>
 
 <hr>
 
 **<ins>Viewing Events</ins>:** DSs and SPW-Rs detected on the current event channels are marked by solid red and green vertical lines on the central plot. Dotted lines are used for events manually added by the user, and dashed lines represent detected events manually deleted by the user.
 
-<p align="left"><img align="left", src="_img/hide_outline.png" width=3%/> &nbsp; button: toggle visibility of event markers on the central plot</p>
+<p align="left"><img align="left", src="_img/hide_outline.png" width=3%/> button: toggle visibility of event markers on the central plot</p>
 
 **← →** &nbsp; buttons: move the viewing window to the next (→) or previous (←) event from the current position
 
