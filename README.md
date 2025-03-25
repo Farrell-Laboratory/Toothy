@@ -129,8 +129,8 @@ Toothy supports automatic data loading from the following acquisition systems:
 * **<ins>OpenEphys</ins>:** data source must contain a ```structure.oebin``` metadata file
 * **<ins>Neuralynx</ins>:** data source must contain unique ```.ncs``` files for each channel
 
-<p><img align="left", src="_img/folder_color.png" width=2%/>&nbsp;: select raw data directory from a supported recording system</p>
-<p><img align="left", src="_img/load.png" width=2%/>&nbsp;: select raw data file in a supported format (see below)</p>
+<p><img align="left", src="_img/folder_color.png" width=2%/>: select raw data directory from a supported recording system</p>
+<p><img align="left", src="_img/load.png" width=2%/>: select raw data file in a supported format (see below)</p>
 
 ### <ins>Loading Data from a File</ins>
 
@@ -162,8 +162,8 @@ After the raw data source is loaded, each data row must be mapped to a unique pr
 <b>Assign probes to the recording:</b><br>
 <ins>Load</ins> button: load an existing probe configuration file<br>
 <ins>Create</ins> button: open the probe designer window to make a new probe<br>
-<img align="left", src="_img/copy.png" width=2%/>: duplicate assigned probe and add to the recording<br>
-<img align="left", src="_img/trash.png" width=2%/>: remove assigned probe from the recording
+<p><img align="left", src="_img/copy.png" width=2%/>: duplicate assigned probe and add to the recording</p>
+<p><img align="left", src="_img/trash.png" width=2%/>: remove assigned probe from the recording</p>
 
 <p></p>
 <b>Set indexing mode:</b><br>
