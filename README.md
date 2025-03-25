@@ -34,14 +34,14 @@ The "Base Folders" window allows users to set default folders and files for data
 
 <p align="center"><img src="_img/base_folders.png" width=50%/></p>
 
-<b><ins>Raw Data</ins>:</b> Select the directory where your raw data files are stored; the default location is the Toothy folder itself. Updating this location is optional but convenient for selecting raw recording data for initial processing.
+<b><ins>Raw Data Folder</ins>:</b> Select the directory where your raw data files are stored; the default location is the Toothy folder itself. Updating this location is optional but convenient when selecting raw recording data for initial processing.
 
-<b><ins>Probe Files</ins>:</b> Select the directory where your probe configuration files will be stored. The application automatically creates a ```probe_configs``` directory within the Toothy folder and creates a ```demo_probe_config.json``` file as an example probe object.
+<b><ins>Probe Configuration Folder</ins>:</b> Select the directory where your probe configuration files will be stored. The application automatically creates a ```probe_configs``` directory within the Toothy folder and creates a ```demo_probe_config.json``` file as an example probe object.
 
-<b><ins>Default Probe</ins>:</b> If your recordings tend to use the same probe, you can optionally select a default probe configuration file that will be automatically loaded during the data processing phase. If this field is blank (the default state), probes will be loaded manually for each recording.
+<b><ins>Default Probe File</ins>:</b> If your recordings tend to use the same probe, you can optionally select a default probe configuration file that will be automatically loaded during the data processing phase. If this field is blank (the default state), probes will be loaded manually for each recording.
 
 <p></p>
-<b><ins>Default Parameters</ins>:</b> Select the TXT file containing the parameter values that you want to use for data processing. The application automatically generates a <code>default_params.txt</code> file with reasonable initial values, which can be changed in the next step. To generate a new parameter file with default values, press the <img src="_img/load_txt.png" width=2%/> button.
+<b><ins>Parameter File</ins>:</b> Select the TXT file containing the parameter values that you want to use for data processing. The application automatically generates a <code>default_params.txt</code> file with reasonable initial values, which can be changed in the next step. To generate a new parameter file with default values, press the <img src="_img/load_txt.png" width=2%/> button.
 
 ---
 
