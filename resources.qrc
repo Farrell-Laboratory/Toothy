@@ -29,10 +29,13 @@
     <file>icons/double_chevron_down.png</file>
     <file>icons/info_blue.png</file>
     <file>icons/arrow_greenCircle_left.png</file>
+    <file>icons/arrow_greenCircle_right.png</file>
     <file>icons/reset.png</file>
     <file>icons/debug.png</file>
     <file>icons/load_txt.png</file>
     <file>icons/folder.png</file>
     <file>icons/folder_color.png</file>
+    <file>icons/green_plus.png</file>
+    <file>icons/red_minus.png</file>
   </qresource>
 </RCC>
