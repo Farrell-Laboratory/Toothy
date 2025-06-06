@@ -40,8 +40,9 @@ The "Base Folders" window allows users to set default folders and files for data
 
 <b><ins>Default Probe File</ins>:</b> If your recordings tend to use the same probe, you can optionally select a default probe configuration file that will be automatically loaded during the data processing phase. If this field is blank (the default state), probes will be loaded manually for each recording.
 
-<p></p>
+<p>
 <b><ins>Parameter File</ins>:</b> Select the TXT file containing the parameter values that you want to use for data processing. The application automatically generates a <code>default_params.txt</code> file with reasonable initial values, which can be changed in the next step. To generate a new parameter file with default values, press the <img src="_img/load_txt.png" width=2%/> button.
+</p>
 
 ---
 
@@ -74,7 +75,7 @@ The probe designer uses the ```probeinterface``` Python package to create a soft
   
 4) Set the electrode contact shape (circles, squares, or rectangles) and size (area/radius/width/height).
 
-<br><br><br>
+<br><br>
 
 **<ins>"Paste"</ins>**
 <p align="center"><img align="left", src="_img/probe_builder2.png" width=30%/></p>
@@ -128,9 +129,8 @@ Toothy supports automatic data loading from the following acquisition systems:
 * **<ins>OpenEphys</ins>:** data source must contain a ```structure.oebin``` metadata file
 * **<ins>Neuralynx</ins>:** data source must contain unique ```.ncs``` files for each channel
 
-<p></p>
-<img align="left", src="_img/folder_color.png" width=2%/>&nbsp;: select raw data directory from a supported recording system<br>
-<img align="left", src="_img/load.png" width=2%/>&nbsp;: select raw data file in a supported format (see below)
+<p><img align="left", src="_img/folder_color.png" width=2%/>: select raw data directory from a supported recording system</p>
+<p><img align="left", src="_img/load.png" width=2%/>: select raw data file in a supported format (see below)</p>
 
 ### <ins>Loading Data from a File</ins>
 
@@ -162,8 +162,8 @@ After the raw data source is loaded, each data row must be mapped to a unique pr
 <b>Assign probes to the recording:</b><br>
 <ins>Load</ins> button: load an existing probe configuration file<br>
 <ins>Create</ins> button: open the probe designer window to make a new probe<br>
-<img align="left", src="_img/copy.png" width=2%/>: duplicate assigned probe and add to the recording<br>
-<img align="left", src="_img/trash.png" width=2%/>: remove assigned probe from the recording
+<p><img align="left", src="_img/copy.png" width=2%/>: duplicate assigned probe and add to the recording</p>
+<p><img align="left", src="_img/trash.png" width=2%/>: remove assigned probe from the recording</p>
 
 <p></p>
 <b>Set indexing mode:</b><br>
@@ -272,13 +272,13 @@ Event boxes are the central hub for setting event channels and analyzing DS and 
 **<ins>Event Channel Assignment</ins>:** users can set each event channel through the *<ins>channel input</ins>* at the top of the corresponding event box. The LFP signals are color-coded to reflect the current event channels for DSs (red), SPW-Rs (green), and theta power (blue), and the central plot displays DS and SPW-R events detected on the specified channel.
 
 <p align="center"><img align="right", src="_img/ds_eventbox.png" width=30%/></p>
-<p align="left"><img align="left", src="_img/reset.png" width=2%/> &nbsp; button: resets the event channel to its initial value</p>
+<p align="left"><img align="left", src="_img/reset.png" width=2%/> button: resets the event channel to its initial value</p>
 
 <hr>
 
 **<ins>Viewing Events</ins>:** DSs and SPW-Rs detected on the current event channels are marked by solid red and green vertical lines on the central plot. Dotted lines are used for events manually added by the user, and dashed lines represent detected events manually deleted by the user.
 
-<p align="left"><img align="left", src="_img/hide_outline.png" width=3%/> &nbsp; button: toggle visibility of event markers on the central plot</p>
+<p align="left"><img align="left", src="_img/hide_outline.png" width=3%/> button: toggle visibility of event markers on the central plot</p>
 
 **← →** &nbsp; buttons: move the viewing window to the next (→) or previous (←) event from the current position
 
