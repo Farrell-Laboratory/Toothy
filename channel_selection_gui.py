@@ -26,6 +26,7 @@ import pdb
 import pyfx
 import ephys
 import gui_items as gi
+import data_processing as dp
 import resources_rc
 
 
@@ -1014,9 +1015,9 @@ class IFigEvent(QtWidgets.QWidget):
                 # overlay other channel(s) for direct comparison
                 comparison_lines = []
                 for xch in self.CH_ON_PLOT[1:]:
-                    xmean = np.nanmean(ephys.getwaves(self.LFP_arr[self.ch2irow[xch]], # NEWSHANK
-                                                self.DF_ALL.loc[xch].idx,
-                                                self.iwin), axis=0)
+                    xmean = ephys.getavg(self.LFP_arr[self.ch2irow[xch]], 
+                                         np.atleast_1d(self.DF_ALL.loc[xch].idx),
+                                         self.iwin)
                     line = self.ax.plot(self.ev_x, xmean, color=self.CHC[xch], lw=2, label=f'ch {xch}')[0]
                     comparison_lines.append(line)
                 self.ax.legend(handles=comparison_lines, loc='upper right', bbox_to_anchor=(1,0.4),
@@ -2573,4 +2574,23 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
     
     def debug(self):
         pdb.set_trace()
-
+        
+def main(ddir=''):
+    """ Run channel selection GUI """
+    # allow user to select processed data folder
+    if not dp.validate_processed_ddir(ddir):
+        dlg = gi.FileDialog(init_ddir=ephys.base_dirs()[0])
+        if not dlg.exec(): return None, None
+        ddir = str(dlg.directory().path())
+        if not dp.validate_processed_ddir(ddir): return None, None
+    # load probe group, launch window
+    probe_group = prif.read_probeinterface(Path(ddir, 'probe_group'))
+    w = ChannelSelectionWindow(ddir, probe_group.probes, 0)
+    w.show()
+    w.raise_()
+    w.exec()
+    return w, ddir
+        
+if __name__ == '__main__':
+    app = pyfx.qapp()
+    w, ddir = main()
