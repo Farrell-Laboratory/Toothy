@@ -6,8 +6,10 @@ Useful functions for data handling and plotting tasks
 @author: amandaschott
 """
 import sys
+import re
 import scipy
 import numpy as np
+import pandas as pd
 import matplotlib.colors as mcolors
 import colorsys
 import matplotlib.pyplot as plt
@@ -101,23 +103,27 @@ def CenterWin(collection, n, total=True):
     return ii, collection[ii]
 
 def get_sequences(idx, ibreak=1) :  
-    """
-    get_sequences(idx, ibreak=1)
-    idx     -    np.vector of indices
-    @RETURN:
-    seq     -    list of np.vectors
-    """
+    """ Return sequences of indices separated by $ibreak (1=consecutive indices) """
     diff = idx[1:] - idx[0:-1]
     breaks = np.nonzero(diff>ibreak)[0]
     breaks = np.append(breaks, len(idx)-1)
-    
-    seq = []    
+    seq = []
     iold = 0
     for i in breaks:
         r = list(range(iold, i+1))
         seq.append(idx[r])
         iold = i+1
     return seq
+
+def laser_start_end(laser, fs=1000., intval=5):
+    """ Return start and end indices for each stimuulation train in $laser """
+    idx = np.where(laser > 0.5)[0]
+    if len(idx) == 0 :
+        return ([], [])
+    idx2 = np.nonzero(np.diff(idx)*(1./fs) > intval)[0]
+    istart = np.hstack([idx[0], idx[idx2+1]])
+    iend   = np.hstack([idx[idx2], idx[-1]])
+    return (istart, iend)
 
 
 ##################################################
@@ -146,7 +152,7 @@ def butter_bandpass_filter(data, lowcut, highcut, lfp_fs, order=3, axis=-1):
 
 
 def Cmap(data, cmap=plt.cm.coolwarm, norm_data=None, alpha=1.0, use_alpha=False):
-    """ Return RGBA array (N x 4) of colors mapped from $data values """
+    """ Return RGB(A) array (N x 3/4) of colors mapped from $data values """
     if norm_data is None:
         norm_data = data
     try:
@@ -159,8 +165,37 @@ def Cmap(data, cmap=plt.cm.coolwarm, norm_data=None, alpha=1.0, use_alpha=False)
         if use_alpha: return np.ones((len(data), 4))
         return np.ones((len(data), 4))
 
+def Cmap_columns(df, cols=[], white_cols=[], map_within=None, combine=False, **cmap_kw):
+    """ Colormap values for each specified column ($cols) in dataframe $df
+    map_within - optional categorical column for colormapping within each category
+    combine - if True, add colormap columns to original dataframe
+    """
+    #cmap_kw=dict(cmap=plt.cm.coolwarm, norm_data=None, alpha=1, use_alpha=True)
+    white_arr = np.ones((len(df), 4))
+    if not cmap_kw.get('use_alpha', False):
+        white_arr = white_arr[:, 0:3]
+    if map_within in df.columns:
+        idx_list = []
+        for cat in np.unique(df[map_within]):
+            idx_list.append(np.array(df[df[map_within]==cat].index))
+    else:
+        idx_list = [np.array(df.index)]
+    fx = lambda x: f'{x}_cmap' + (f'_by_{map_within}' if map_within in df.columns else '')
+    cmap_df = pd.DataFrame(columns=[*map(fx, cols)], index=np.array(df.index), dtype='object')
+    for col,newcol in zip(cols,cmap_df.columns):
+        if col in white_cols:
+            cmap_df.loc[:, newcol] = [*map(tuple, white_arr)]
+        else:
+            for idx in idx_list:
+                clr_arr = np.round(Cmap(np.array(df.loc[idx, col]), **cmap_kw), 3)
+                cmap_df.loc[idx, newcol] = [*map(tuple, clr_arr)]
+    if combine:
+        cmap_df = pd.concat([df, cmap_df], axis=1)
+    return cmap_df
+
     
 def truncate_cmap(cmap, minval=0.0, maxval=1.0, n=100):
+    """ Return segment of colormap from $minval to $maxval with $n elements """
     new_cmap = mcolors.LinearSegmentedColormap.from_list(
         'trunc({n},{a:.2f},{b:.2f})'.format(n=cmap.name, a=minval, b=maxval),
         cmap(np.linspace(minval, maxval, n)))
@@ -169,8 +204,6 @@ def truncate_cmap(cmap, minval=0.0, maxval=1.0, n=100):
 
 def color2rgba(c):
     """ Convert input color to 4-element RGBA array, scaled 0-1 """
-    import re
-                
     def rgb_str(c):
         fmt = '%s' + re.escape("(") + '(.*)' + re.escape(")")  # "rgb(...)" format
         fx  = lambda r: [*map(float, r[0].replace(' ','').split(','))]
@@ -221,9 +254,11 @@ def qstyle_rgb(c, alpha=False):
     return 'rgb' + str(rgb_255)
 
 def get_hex(c):
+    """ Return HEX color code """
     return mcolors.rgb2hex(rgb1(c))#, keep_alpha=True)
 
 def alpha_like(c, alpha=0.5, bg='white', dtype=tuple):
+    """ Return RGB tuple approximating color $c with opacity $alpha """
     if alpha > 1: alpha /= 255.
     rgba = rgb1(c, alpha=True, dtype=list)
     # match input RGBA if given, otherwise use $alpha param
@@ -235,12 +270,13 @@ def alpha_like(c, alpha=0.5, bg='white', dtype=tuple):
     return dtype(new_rgb1)
 
 def Cmap_alpha(cmap, alpha):
+    """ Return RGBA array of colors ($cmap) with opacity $alpha """
     return np.c_[cmap[:, 0:3], np.ones(len(cmap))*alpha]
     
 def Cmap_alpha_like(cmap, alpha):
+    """ Return RGB array of colors ($cmap) approximating the given $alpha """
     converted_c = [*map(lambda c: alpha_like(c, alpha, dtype=np.array), cmap)]
     return np.array(converted_c)
-
 
 def hue(c, percent, mode=1, cscale=255, alpha=1, res='tuple'):
     """ Adjust input color tint (mode=1), shade (0), or saturation (0.5) """
@@ -261,7 +297,7 @@ def hue(c, percent, mode=1, cscale=255, alpha=1, res='tuple'):
     
     
 def rand_hex(n=1, bright=True):
-    """ Return $n random colors in hex code format """
+    """ Return $n random colors in HEX code format """
     hue = np.random.uniform(size=n)
     if bright:
         l_lo, l_hi, s_lo, s_hi = [0.4, 0.6, 0.7, 1.0]
@@ -314,30 +350,79 @@ def qapp():
         app.setQuitOnLastWindowClosed(True)
     return app
 
+def dict2ss(ddict):
+    """ Convert dictionary to a Qt style sheet string """
+    ffx = lambda d: '{' + ' '.join([f'{k}:{v};' for k,v in d.items()]) + '}'
+    ss = ' '.join([f'{key} {ffx(d)}' for key,d in ddict.items()])
+    return ss
+
 def layout_items(qlayout):
     """ Return all widgets in a given QBoxLayout """
     items = [qlayout.itemAt(i).widget() for i in range(qlayout.count())]
     return items
 
+def remove_items_from_layout(layout):
+    """ Remove all widgets and nested layouts in a given QBoxLayout """
+    if layout is not None:
+        while layout.count() > 0:
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+            else:
+                remove_items_from_layout(item.layout())
+
 def stealthy(widget, val):
     """ Lazy method for updating widgets without triggering signals  """
     widget.blockSignals(True)
-    try: widget.setValue(val)                       # spinbox value
+    try: widget.setValue(val)                     # spinbox value
     except:
-        try: widget.setRange(*val)                  # spinbox range
+        try: widget.setRange(*val)                # spinbox range
         except:
-            try: widget.setCurrentText(val)         # dropdown item
+            try: widget.setCurrentText(val)       # dropdown text
             except:
-                try: widget.setPlainText(val)       # text edit content
+                try: widget.setCurrentIndex(val)  # dropdown index
                 except:
-                    try: widget.setText(val)        # line edit content
+                    try: widget.setChecked(val)   # button checked
                     except:
-                        try: widget.setChecked(val) # button check
+                        try: widget.setPlainText(val) # text edit content
                         except:
-                            pdb.set_trace()
-                            print(f'Could not set value for widget {widget}')
+                            try: widget.setText(val)  # line edit content
+                            except:
+                                print(f'Could not set value for widget {widget}')
     widget.blockSignals(False)
-
+    
+def get_widget_container(orientation, *widgets, widget='none', **kwargs):
+    """ Organize $widgets in a QBoxLayout, optionally embedded in a parent widget """
+    alignments, stretch_factors = [kwargs.get(k,[]) for k in ['alignments','stretch_factors']]
+    if   orientation=='v': layout = QtWidgets.QVBoxLayout() # vertical layout
+    elif orientation=='h': layout = QtWidgets.QHBoxLayout() # horizontal layout
+    layout.setContentsMargins(0,0,0,0)
+    layout.setSpacing(kwargs.get('spacing', 1))
+    for i,w in enumerate(widgets):
+        ddict = {}  # set item stretch and alignment within container layout
+        if len(stretch_factors) == len(widgets):
+            ddict['stretch'] = stretch_factors[i]
+        if len(alignments) == len(widgets) and w.inherits('QWidget'):
+            ddict['alignment'] = alignments[i]
+        if   w.inherits('QWidget'): layout.addWidget(w, **ddict) # add widget
+        elif w.inherits('QLayout'): layout.addLayout(w, **ddict) # add layout
+    if widget in ['widget','frame','scroll']:
+        w = QtWidgets.QWidget() if widget in ['widget','scroll'] else QtWidgets.QFrame()
+        w.setLayout(layout)
+        if widget == 'scroll':
+            q = QtWidgets.QScrollArea()
+            q.setWidgetResizable(True)
+            q.setWidget(w)
+            return q  # embed layout within a QScrollArea
+        else:
+            return w  # embed layout within a QWidget or QFrame
+    elif widget == 'dialog':
+        dlg = QtWidgets.QDialog() # embed layout within a QDialog window
+        dlg.setLayout(layout)
+        return dlg
+    else:
+        return layout # return layout object
 
 class DividerLine(QtWidgets.QFrame):
     """ Basic horizontal (or vertical) separator line """
@@ -351,7 +436,6 @@ class DividerLine(QtWidgets.QFrame):
         self.setLineWidth(lw)
         self.setMidLineWidth(mlw)
         
-        
 def InterWidgets(parent, orientation='v'):
     """ Return layout with an intermediate widget between $parent and children """
     # parent -> interlayout > interwidget > layout
@@ -364,21 +448,9 @@ def InterWidgets(parent, orientation='v'):
     else                    : layout = QtWidgets.QGridLayout(interwidget)
     interlayout.addWidget(interwidget)
     return interlayout, interwidget, layout
-        
-
-def ScreenRect_V1(perc_width=1, perc_height=1, keep_aspect=True):
-    """ Return QRect box centered and scaled relative to screen geometry """
-    screen_rect = QtWidgets.QDesktopWidget().screenGeometry()
-    if keep_aspect:
-        perc_width, perc_height = [min([perc_width, perc_height])] * 2
-    app_width = int(screen_rect.width() * perc_width)
-    app_height = int(screen_rect.height() * perc_height)
-    app_x = int((screen_rect.width() - app_width) / 2)
-    app_y = int((screen_rect.height() - app_height) / 2)
-    qrect = QtCore.QRect(app_x, app_y, app_width, app_height)
-    return qrect
 
 def ScreenRect(perc_width=1, perc_height=1, keep_aspect=True):
+    """ Return QRect with height/width scaled from screen geometry """
     qapp()
     screen_rect = QtWidgets.QDesktopWidget().screenGeometry()
     if keep_aspect:
@@ -389,7 +461,6 @@ def ScreenRect(perc_width=1, perc_height=1, keep_aspect=True):
     app_y = int((screen_rect.height() - app_height) / 2)
     qrect = QtCore.QRect(app_x, app_y, app_width, app_height)
     return qrect
-
 
 def get_ddir():
     qapp()
