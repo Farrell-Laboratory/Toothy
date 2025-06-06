@@ -99,7 +99,6 @@ class CSD(object):
         csd : np.ndarray * quantity.Quantity
             Array with the csd estimate
         '''
-        pdb.set_trace()
         csd = np.linalg.solve(self.f_matrix, self.lfp)
 
         return csd * (self.f_matrix.units**-1*self.lfp.units).simplified
@@ -332,7 +331,6 @@ class DeltaiCSD(CSD):
 
 
     def get_f_matrix(self):
-        pdb.set_trace()
         '''Calculate the F-matrix'''
         f_matrix = np.empty((self.coord_electrode.size,
                              self.coord_electrode.size))*self.coord_electrode.units
