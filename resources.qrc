@@ -37,5 +37,8 @@
     <file>icons/folder_color.png</file>
     <file>icons/green_plus.png</file>
     <file>icons/red_minus.png</file>
+    <file>icons/green_circle.png</file>
+    <file>icons/yellow_circle.png</file>
+    <file>icons/red_circle.png</file>
   </qresource>
 </RCC>
