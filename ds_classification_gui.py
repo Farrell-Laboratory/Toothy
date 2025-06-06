@@ -26,6 +26,7 @@ import icsd
 import pyfx
 import ephys
 import gui_items as gi
+import data_processing as dp
 
 gbox_ss_main = ('QGroupBox {'
                 'background-color : rgba(220,220,220,100);'  # gainsboro
@@ -516,7 +517,7 @@ class DS_CSDWindow(QtWidgets.QDialog):
         self.shank = self.probe.get_shanks()[ishank]
         # get probe geometry
         ypos = np.array(sorted(self.shank.contact_positions[:, 1]))
-        self.coord_electrode = pq.Quantity(ypos, self.probe.si_units).rescale('m')  # um -> m
+        self.coord_electrode = pq.Quantity(ypos, self.probe.si_units).rescale('m', dtype='float32')  # um -> m
         # get absolute and relative channels
         self.shank_channels = self.shank.get_indices()
         self.channels = np.arange(len(self.shank_channels), dtype='int')
@@ -671,14 +672,14 @@ class DS_CSDWindow(QtWidgets.QDialog):
         
     def get_csd(self, channels, idx, ddict):
         csd_lfp = self.lfp_interp[channels, :][:, idx]
-        csd_obj = ephys.get_csd_obj(csd_lfp, self.coord_electrode, ddict)
+        csd_obj = ephys.get_csd_obj(csd_lfp, self.coord_electrode[channels], ddict)
         csds = ephys.csd_obj2arrs(csd_obj)
         return (csd_lfp, *csds)
         
     def get_csd_surround(self, channels, idx, ddict, twin):
         iwin = int(round(twin*self.lfp_fs))
         mean_lfp = np.array([ephys.getavg(self.lfp_interp[i], idx, iwin) for i in channels])
-        csd_obj = ephys.get_csd_obj(mean_lfp, self.coord_electrode, ddict)
+        csd_obj = ephys.get_csd_obj(mean_lfp, self.coord_electrode[channels], ddict)
         mean_csds = ephys.csd_obj2arrs(csd_obj)
         return (mean_lfp, *mean_csds)
     
@@ -712,7 +713,6 @@ class DS_CSDWindow(QtWidgets.QDialog):
         self.mean_csds_2 = self.get_csd_surround(self.csd_chs, self.idx_ds2, ddict, twin=twin)
         
         # update params, allow save
-        #ffindme
         self.CSD_PARAMS.update(**ddict)
         self.widget.save_btn.setEnabled(True)
         
@@ -720,11 +720,12 @@ class DS_CSDWindow(QtWidgets.QDialog):
         self.plot_ds_csds(twin=twin)
         self.plot_bar.fig0_btn.setChecked(False)
         self.plot_bar.fig1_btn.setEnabled(True)
-        self.plot_bar.fig1_btn.setChecked(True)
+        self.plot_bar.fig1_btn.setChecked(False)
         
         # plot PCA scatterplot
         self.fig27.DS_DF = self.DS_DF
         self.plot_bar.fig27_btn.setEnabled(True)
+        self.plot_bar.fig27_btn.setChecked(False)
         alg = str(self.CSD_PARAMS['clus_algo'])
         init_btn = ['kmeans','dbscan'].index(alg)
         self.fig27.plot_ds_pca(alg)
@@ -733,6 +734,7 @@ class DS_CSDWindow(QtWidgets.QDialog):
         # plot mean waveforms
         self.plot_ds_by_type(twin=twin)
         self.plot_bar.fig3_btn.setEnabled(True)
+        self.plot_bar.fig3_btn.setChecked(True)
     
     
     def plot_csd_window(self, twin=0.2):
@@ -940,3 +942,47 @@ class DS_CSDWindow(QtWidgets.QDialog):
     def closeEvent(self, event):
         plt.close()
         event.accept()
+        
+def main(ddir='', iprobe=0, ishank=0):
+    """ Run DS classification GUI """
+    # allow user to select processed data folder, probe, and shank
+    if not dp.validate_classification_ddir(ddir, iprobe, ishank):
+        dlg = gi.FileDialog(init_ddir=ephys.base_dirs()[0])
+        if not dlg.exec(): return None, (None,None,None)
+        ddir = str(dlg.directory().path())
+        if not dp.validate_processed_ddir(ddir): return None, (None,None,None)
+        # get all valid shanks for the selected directory
+        probe_group = prif.read_probeinterface(Path(ddir, 'probe_group'))
+        llist = []
+        for iprb,prb in enumerate(probe_group.probes):
+            for ishk,shk in enumerate(prb.get_shanks()):
+                if dp.validate_classification_ddir(ddir, iprb, ishk):
+                    llist.append([iprb, ishk])
+        if len(llist) == 0:  # if directory contains no valid shanks, raise error message
+            QtWidgets.QMessageBox.critical(None, 'Error', 'No qualifying shanks in directory.')
+            return None, (None,None,None)
+        if len(llist) > 1:   # if directory contains 2+ valid shanks, prompt user to select desired shank
+            radio_btns = [QtWidgets.QRadioButton(f'probe {a}, shank {b}') for a,b in llist]
+            radio_btns[0].setChecked(True)
+            continue_btn = QtWidgets.QPushButton('Continue')
+            dlg = pyfx.get_widget_container('v', *[*radio_btns, continue_btn], widget='dialog')
+            continue_btn.clicked.connect(dlg.accept)
+            res = dlg.exec()
+            if not res: return None, (None,None,None)
+            # update $iprobe and $ishank from selected radio button
+            probe_txt, shank_txt = [b for b in radio_btns if b.isChecked()][0].text().split(', ')
+            iprobe = int(probe_txt.split(' ')[1])
+            ishank = int(shank_txt.split(' ')[1])
+        else:  # if directory contains exactly one valid shank, automatically select it
+            iprobe, ishank = llist[0]
+    print(f'iprobe={iprobe}, ishank={ishank}')
+    # launch window
+    w = DS_CSDWindow(ddir, iprobe, ishank)
+    w.show()
+    w.raise_()
+    w.exec()
+    return w, (ddir, iprobe, ishank)
+
+if __name__ == '__main__':
+    app = pyfx.qapp()
+    w, (ddir,iprobe,ishank) = main()
