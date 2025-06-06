@@ -262,6 +262,7 @@ class ChannelMapWidget(QtWidgets.QWidget):
         self.tbl_btn.setChecked(False)
         self.txt_btn.setChecked(True)
         self.sortByPos_btn.setVisible(self.MODE==1)
+        self.sortByPos_btn.hide()
             
         self.hlay = QtWidgets.QHBoxLayout(self)
         self.hlay.setContentsMargins(0,0,0,0)
@@ -1600,6 +1601,7 @@ class probegod(QtWidgets.QWidget):
         self.bbox_lay.addWidget(self.plot_btn)
         self.bbox_lay.addWidget(self.save_btn)
         self.bbox_lay.addWidget(self.clear_btn)
+        _ = [x.setAutoDefault(False) for x in self.bbox.children()[1:]]
         #self.bbox_lay.addWidget(self.accept_btn)
         
         self.layout = QtWidgets.QVBoxLayout()
