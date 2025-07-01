@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Mon Jul 22 10:45:06 2024
+Main analysis GUI
 
 @author: amandaschott
 """
 import os
 from pathlib import Path
 import scipy
+import h5py
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -20,9 +21,9 @@ from copy import deepcopy
 import bisect
 import quantities as pq
 from PyQt5 import QtWidgets, QtCore, QtGui
-import probeinterface as prif
 import pdb
 # custom modules
+import QSS
 import pyfx
 import ephys
 import gui_items as gi
@@ -42,28 +43,26 @@ def str_fmt(ddict, key=None, key_top=True):
        
 
 class IFigLFP(QtWidgets.QWidget):
-    """ Main channel selection figure; scrollable LFPs with optional event markers """
+    """ Main analysis figure; scrollable LFPs with optional event markers """
     updated_noise_signal = QtCore.pyqtSignal(int, np.ndarray)
     
-    SHOW_DS = True
-    SHOW_SWR = True
-    ADD_DS = False
-    ADD_SWR = False
-    SHOW_DS_RM = False
-    SHOW_SWR_RM = False
-    SHOW_SZR = False
+    SHOW_DS = True       # show DS event markers
+    SHOW_SWR = True      # show ripple event markers
+    ADD_DS = False       # enable addition of new DSs to dataset by clicking
+    ADD_SWR = False      # enable addition of new ripples to dataset by clicking
+    SHOW_DS_RM = False   # show markers for DSs excluded from dataset
+    SHOW_SWR_RM = False  # show markers for ripples excluded from dataset
     
     def __init__(self, DATA, lfp_time, lfp_fs, PARAMS, **kwargs):
         super().__init__()
-        self.DATA = DATA
-        self.lfp_time = lfp_time
-        self.lfp_fs = lfp_fs
-        self.PARAMS = PARAMS
-        
-        twin = kwargs.get('twin', 1)
+        self.DATA = DATA          # dictionary of raw and filtered LFP signals
+        self.lfp_time = lfp_time  # recording times (s)
+        self.lfp_fs = lfp_fs      # LFP sampling rate (Hz)
+        self.PARAMS = PARAMS      # parameter dictionary
+        # initialize event channels
+        twin = kwargs.get('twin', 1)  # initial viewing window size (+/- X s)
         event_channels = kwargs.get('event_channels', [0,0,0])
         self.ch_cmap = pd.Series(['blue', 'green', 'red'], index=event_channels)
-        
         #self.probe = kwargs.get('probe', None)
         self.shank = kwargs.get('shank', None)
         self.AUX = kwargs.get('AUX', np.full(len(self.lfp_time), np.nan))
@@ -71,51 +70,45 @@ class IFigLFP(QtWidgets.QWidget):
         self.SWR_ALL = kwargs.get('SWR_ALL', None)
         self.STD = kwargs.get('STD', None)
         self.NOISE_TRAIN = kwargs.get('NOISE_TRAIN', None)
-        self.seizures = kwargs.get('seizures', [])
         self.SWR_THRES = kwargs.get('SWR_THRES')
         self.init_event_items()  # create event indexes/trains/etc
         
         # create subplots and interactive widgets
         self.plot_height = pyfx.ScreenRect(perc_height=0.75).height()
         self.create_subplots(twin=twin)
-        
         self.fig.set_tight_layout(True)
         self.fig_w.set_tight_layout(True)
         self.fig_freq.set_tight_layout(True)
-        
-        self.canvas = FigureCanvas(self.fig)
+        # main canvas with toolbar and central LFP plot
+        self.canvas = FigureCanvas(self.fig)  # main plot canvas
         self.canvas.setFocusPolicy(QtCore.Qt.ClickFocus)
         self.toolbar = NavigationToolbar(self.canvas, self)
         self.toolbar.setOrientation(QtCore.Qt.Vertical)
         self.toolbar.setMaximumWidth(30)
-        self.canvas_freq = FigureCanvas(self.fig_freq)
-        self.canvas_w = FigureCanvas(self.fig_w)
+        self.canvas_freq = FigureCanvas(self.fig_freq) # freq plot canvas
+        self.canvas_w = FigureCanvas(self.fig_w) # slider canvas
         self.canvas_w.setMaximumHeight(80)
-        
         self.connect_mpl_widgets()
-        
+        # embed plots in QScrollArea for vertical zoom
         self.plot_row = QtWidgets.QWidget()
         self.plot_row.setFixedHeight(self.plot_height)
         self.plot_row_hlay = QtWidgets.QHBoxLayout(self.plot_row)
+        self.plot_row_hlay.setContentsMargins(0,0,0,0)
         self.plot_row_hlay.addWidget(self.toolbar, stretch=0)
-        self.plot_row_hlay.addWidget(self.canvas, stretch=5)
+        self.plot_row_hlay.addWidget(self.canvas, stretch=6)
         self.plot_row_hlay.addWidget(self.canvas_freq, stretch=3)
-        
         self.qscroll = QtWidgets.QScrollArea()
         self.qscroll.setWidgetResizable(True)
         self.qscroll.setWidget(self.plot_row)
-        
         self.layout = QtWidgets.QVBoxLayout(self)
         self.layout.addWidget(self.canvas_w)
         self.layout.addWidget(self.qscroll)
-        #self.layout.addLayout(self.plot_row)
         self.canvas_freq.hide()
         
         self.channel_changed(*event_channels)
     
-    
     def create_subplots(self, twin):
-        """ Set up data and widget subplot axes """
+        """ Set up subplot axes for data plots and slider widgets """
         
         ### SLIDER AXES
         self.fig_w = matplotlib.figure.Figure()
@@ -163,8 +156,8 @@ class IFigLFP(QtWidgets.QWidget):
         self.ax = self.fig.add_subplot()
         self.ax.sharey(fax0)
     
-    
     def connect_mpl_widgets(self):
+        """ Connect keyboard/mouse inputs """
         
         def oncallback(xmin, xmax):
             """ Dynamically draw selection rectangle during mouse drag """
@@ -187,19 +180,24 @@ class IFigLFP(QtWidgets.QWidget):
                                                     props=dict(fc='red', ec='black', lw=5, alpha=0.5))
         
         def on_click(event):
+            """ Mouse press events 
+            Right click -> context menu options for the nearest channel/timepoint
+            Double click -> add a new DS or ripple event to the dataset
+            """
             if event.xdata is None: return
-            ### SELECT CHANNEL ###
+            
+            ### CONTEXT MENU ###
+            
             if event.button == matplotlib.backend_bases.MouseButton.RIGHT:
                 # get closest channel/timepoint to clicked point
                 ch = -int(round(event.ydata))
-                # NEWSHANK
                 if ch not in self.shank_channels: return
                 ich = list(self.shank_channels).index(ch)
                 ###
                 idx = pyfx.IdxClosest(event.xdata, self.lfp_time)
                 tpoint = round(self.lfp_time[idx], 2)
                 # highlight selected channel/timepoint
-                xdata, ydata = self.ax.get_lines()[ich].get_data() # NEWSHANK (ich)
+                xdata, ydata = self.ax.get_lines()[ich].get_data()
                 shadow = self.ax.plot(xdata, ydata, color='yellow', zorder=-1, lw=5)[0]
                 vline = self.ax.axvline(tpoint, color='indigo', zorder=-1, lw=2, ls='--')
                 self.canvas.draw_idle()
@@ -207,7 +205,7 @@ class IFigLFP(QtWidgets.QWidget):
                 # create context menu and section headers
                 menu = QtWidgets.QMenu()
                 headers = []
-                for txt in [f'Time = {tpoint} s', f'Channel {ch}']:
+                for txt in [f'Time = {tpoint:.2f} s', f'Channel {ch}']:
                     hdr = QtWidgets.QWidgetAction(self)
                     lbl = QtWidgets.QLabel(txt)
                     hdr.setDefaultWidget(lbl)
@@ -238,7 +236,6 @@ class IFigLFP(QtWidgets.QWidget):
                     new_noise_train[ch] = int(1-self.NOISE_TRAIN[ch])
                     self.updated_noise_signal.emit(ch, new_noise_train)
                     self.plot_lfp_data()
-                    
                 shadow.remove()
                 vline.remove()
                 self.canvas.draw_idle()
@@ -266,13 +263,12 @@ class IFigLFP(QtWidgets.QWidget):
                     istart, istop = ipk + (np.round(pws[2:4]).astype('int')-iwin)
                     ds_raw_lfp = self.DATA['raw'][self.hil_chan][ipk-iwin : ipk+iwin]
                     imax = ipk + (np.argmax(ds_raw_lfp)-iwin)
-                    
                     ddict = dict(ch=self.hil_chan, time=self.lfp_time[imax], amp=props['peak_heights'][0],
                                  half_width=(pws[0]/self.lfp_fs)*1000, width_height=pws[1],
                                  asym=ephys.get_asym(ipk,istart,istop), prom=props['prominences'][0],
                                  start=self.lfp_time[istart], stop=self.lfp_time[istop],
                                  idx=imax, idx_peak=ipk, idx_start=istart, idx_stop=istop,
-                                 status=2, is_valid=1)
+                                 status=2, is_valid=1, shank=int(self.shank.shank_id))
                 elif self.ADD_SWR:
                     half_win = int(iwin/2)
                     # get SWR envelope peak in central half of window
@@ -306,7 +302,7 @@ class IFigLFP(QtWidgets.QWidget):
                                  amp=env[iwin], dur=(pws[0]/self.lfp_fs)*1000, freq=swr_ifreq,
                                  start=self.lfp_time[istart], stop=self.lfp_time[istop],
                                  idx=imax, idx_peak=ipk, idx_start=istart, idx_stop=istop,
-                                 status=2, is_valid=1)
+                                 status=2, is_valid=1, shank=int(self.shank.shank_id))
                 
                 # add freq band power to data row, update n_valid column
                 ddict.update({**self.STD.loc[CHAN].to_dict(), 'n_valid':0})
@@ -317,25 +313,25 @@ class IFigLFP(QtWidgets.QWidget):
                 elif EV == 'swr': self.SWR_ALL = EV_DF
                 self.update_event_items(event=EV)
                 self.plot_lfp_data()
-                print(f'added {EV}!')
-                
+                print(f'Added {EV.upper()}!')
             
         def on_press(event):
-            """ Handle keypress events """
+            """ Key press events
+            Left/right arrows -> shift viewing window back/forward by 25%
+            Backspace -> Exclude highlighted event(s) from analysis
+            Spacebar -> Restore previously excluded events
+            Escape -> Permanently erase event(s) from the dataset
+            Enter -> Display CSD heatmap over the selected interval
+            """
             # update current timepoint with arrow keys 
             if event.key   == 'left'  : self.iw.i.key_step(0)  # step backwards
             elif event.key == 'right' : self.iw.i.key_step(1)  # step forwards
             
             elif event.key in ['backspace', 'escape', ' ', 'enter'] and self.xspan > 0:
-                """
-                backspace: remove event from dataset
-                escape: delete event permanently
-                space: restore hidden event
-                enter: plot instantaneous CSD
-                """
+                # get selected time interval
                 irg = (imin, imax) = list(map(lambda x: int(x*self.lfp_fs), self.span.extents))
                 
-                ###   PERMANENTLY DELETE EVENTS   ###
+                ###   PERMANENTLY ERASE EVENTS   ###
                 
                 if event.key=='escape':
                     # delete detected DS events
@@ -344,19 +340,17 @@ class IFigLFP(QtWidgets.QWidget):
                                                      chan=self.hil_chan, mode='erase')
                         if res:
                             self.update_event_items(event='ds')
-                            
                     # delete detected SWR events
                     if self.SHOW_SWR and self.SWR_ALL is not None:
                         res = self.edit_event_status(self.SWR_ALL, idx=self.SWR_valid, irange=irg, 
                                                      chan=self.ripple_chan, mode='erase')
                         if res:
                             self.update_event_items(event='swr')
-                    
                     self.span.set_visible(False)
                     self.plot_lfp_data()
                 
                 
-                ###   DELETE EVENTS
+                ###   EXCLUDE EVENTS FROM ANALYSIS   ###
                 
                 if event.key=='backspace':
                     # remove detected DS events
@@ -365,18 +359,16 @@ class IFigLFP(QtWidgets.QWidget):
                                                      chan=self.hil_chan, mode='delete')
                         if res:
                             self.update_event_items(event='ds')
-                    
                     # remove detected SWR events
                     if self.SHOW_SWR and self.SWR_ALL is not None:
                         res = self.edit_event_status(self.SWR_ALL, idx=self.SWR_valid, irange=irg, 
                                                      chan=self.ripple_chan, mode='delete')
                         if res:
                             self.update_event_items(event='swr')
-                            
                     self.span.set_visible(False)
                     self.plot_lfp_data()
                     
-                ###   RESTORE EVENTS
+                ###   RESTORE EXCLUDED EVENTS   ###
                 
                 elif event.key==' ':
                     # replace previously deleted DS events
@@ -385,7 +377,6 @@ class IFigLFP(QtWidgets.QWidget):
                                                      chan=self.hil_chan, mode='restore')
                         if res:
                             self.update_event_items(event='ds')
-                        
                     # replace previously deleted DS events
                     if self.SHOW_SWR and self.SHOW_SWR_RM and self.SWR_ALL is not None:
                         res = self.edit_event_status(self.SWR_ALL, idx=self.SWR_idx, irange=irg, 
@@ -394,10 +385,12 @@ class IFigLFP(QtWidgets.QWidget):
                             self.update_event_items(event='swr')
                     self.span.set_visible(False)
                     self.plot_lfp_data()
-                    
+                
+                ###   PLOT INSTANTANEOUS CSD   ###
+                
                 elif event.key=='enter' and self.coord_electrode is not None:
                     # plot temporary CSD
-                    arr = self.DATA['raw'][self.shank_channels, imin:imax] # NEWSHANK
+                    arr = self.DATA['raw'][self.shank_channels, imin:imax]
                     arr2 = np.array(arr)
                     noise_idx_rel = np.nonzero(self.NOISE_TRAIN[self.shank_channels])[0]
                     clean_idx_rel = np.setdiff1d(np.arange(arr.shape[0]), noise_idx_rel)
@@ -415,19 +408,17 @@ class IFigLFP(QtWidgets.QWidget):
                     # calculate CSD
                     csd_obj = ephys.get_csd_obj(arr2, self.coord_electrode, self.PARAMS)
                     csd = ephys.csd_obj2arrs(csd_obj)[1]
-                    # NEWSHANK
                     a,b = pyfx.Edges(self.shank_channels)
-                    yax = np.linspace(a-1, b+1, len(csd)) * -1
-                    #yax  = np.linspace(-1, len(csd), len(csd)) * -1
+                    yax = np.linspace(b+1, a-1,len(csd)) * -1 # (-43,-42...,0,1)
+                    csd = csd[::-1, :]  # arrange rows bottom to top to match $yax
                     try:
                         _ = self.ax.pcolorfast(self.lfp_time[imin:imax], yax, csd, 
                                                cmap=plt.get_cmap('bwr'))
                     except:
                         _ = self.ax.pcolorfast(pyfx.Edges(self.lfp_time[imin:imax]), 
                                                           pyfx.Edges(yax), csd, cmap=plt.get_cmap('bwr'))
-                    
                     self.span.set_visible(False)
-                    self.canvas.draw_idle()  
+                    self.canvas.draw_idle()
         self.cid = self.canvas.mpl_connect("key_press_event", on_press)
         self.cid2 = self.canvas.mpl_connect("button_press_event", on_click)
         
@@ -439,7 +430,6 @@ class IFigLFP(QtWidgets.QWidget):
         irows = np.where((DF.ch == chan) & (np.in1d(DF.idx, qidx)))[0]
         if len(irows) == 0:
             return False
-        
         if mode == 'erase':
             # delete event forever
             DF.reset_index(inplace=True)
@@ -447,8 +437,8 @@ class IFigLFP(QtWidgets.QWidget):
             DF.set_index('index', inplace=True)
             DF.index.name = None
             DF.loc[chan, 'n_valid'] = DF.loc[chan, 'is_valid'].sum()
+            print(f'Permanently erased {len(irows)} event(s)!')
             return True
-        
         # set status negative (1>>-1, -1>>-1) or positive (1>>1, -1>>1)
         if   mode == 'delete'  : fx = lambda x: x * np.sign(x) * -1
         elif mode == 'restore' : fx = lambda x: np.abs(x)
@@ -458,10 +448,11 @@ class IFigLFP(QtWidgets.QWidget):
         # removed events (-1 or -2) are invalid; restored events are valid
         DF.iloc[irows, DF.columns.get_loc('is_valid')] = (d > 0).astype('int')
         DF.loc[chan, 'n_valid'] = DF.loc[chan, 'is_valid'].sum()
+        print(f'{mode.capitalize()}d {len(irows)} event(s)!')
         return True
     
-    
     def plot_freq_band_pwr(self):
+        """ Plot distribution of channel amplitudes for defined frequency bands """
         _ = [ax.clear() for ax in self.faxs]
         self.freq_kw = dict(xytext=(4,4), xycoords=('axes fraction','data'), 
                             bbox=dict(facecolor='w', edgecolor='w', 
@@ -470,8 +461,6 @@ class IFigLFP(QtWidgets.QWidget):
                             fontweight='semibold', annotation_clip=True)
         # (channel, color) for each event
         (TH,THC), (RPL,RPLC), (HIL,HILC) = self.ch_cmap.items()
-        
-        # NEWSHANK
         noise_idx_rel = np.nonzero(self.NOISE_TRAIN[self.shank_channels])[0]
         if (len(noise_idx_rel) == 0) and (len(self.shank_channels) == len(self.STD)):
             tmp = self.STD[['norm_theta','norm_swr','slow_gamma','fast_gamma']].values.T
@@ -506,32 +495,29 @@ class IFigLFP(QtWidgets.QWidget):
         self.faxs[0].set_title('Theta Power', va='bottom', y=0.97)
         self.faxs[1].set_title('Ripple Power', va='bottom', y=0.97)
         self.faxs[2].set_title('Gamma Power', va='bottom', y=0.97)
-        leg = self.faxs[2].legend(loc='upper right', bbox_to_anchor=(1.1,.95))
+        _ = self.faxs[2].legend(loc='upper right', bbox_to_anchor=(1.1,.95))
         _ = [ax.set_xlabel('SD') for ax in self.faxs]
+        _ = self.faxs[0].set_yticks(yax, labels=np.int16(abs(yax)).astype('str'))
         
         # set style, annotation kwargs
         self.faxs[1].spines['left'].set_visible(False)
         self.faxs[2].spines['left'].set_visible(False)
-        
-        _ = self.faxs[0].set_yticks(yax, labels=np.int16(abs(yax)).astype('str')) # NEWSHANK
-        
         self.canvas_freq.draw_idle()
         
     def switch_the_probe(self, **kwargs):
+        """ Update local variables for a new probe """
         self.DATA = kwargs['DATA']
         self.DS_ALL = kwargs.get('DS_ALL', None)
         self.SWR_ALL = kwargs.get('SWR_ALL', None)
         self.STD = kwargs.get('STD', None)
         self.NOISE_TRAIN = kwargs.get('NOISE_TRAIN', None)
-        self.seizures = kwargs.get('seizures', [])
-        # NEWSHANK
         #self.probe = kwargs.get('probe', None)
         _shank = kwargs.get('shank', None)
         _event_channels = kwargs.get('event_channels', [0,0,0])
         self.switch_the_shank(shank=_shank, event_channels=_event_channels)
     
     def switch_the_shank(self, **kwargs):
-        # NEWSHANK
+        """ Update local variables for a new shank """
         self.shank = kwargs.get('shank', None)
         event_channels = kwargs.get('event_channels', [0,0,0])
         self.ch_cmap = pd.Series(['blue', 'green', 'red'], index=event_channels)
@@ -540,16 +526,15 @@ class IFigLFP(QtWidgets.QWidget):
         self.plot_freq_band_pwr()
     
     def init_event_items(self):
+        """ Initialize channels, geometry, and event trains for the given probe/shank """
         # try getting electrode geometry in meters
         self.coord_electrode = None
-        # NEWSHANK
         if self.shank is None:
             self.shank_channels = np.arange(self.DATA['raw'].shape[0])
         else:
             self.shank_channels = np.array(self.shank.get_indices())
             ypos = np.array(sorted(self.shank.contact_positions[:, 1]))
             self.coord_electrode = pq.Quantity(ypos, self.shank.probe.si_units).rescale('m')  # um -> m
-        
         # get data timecourses
         self.lfp_ampl = np.nansum(self.DATA['raw'][self.shank_channels, :], axis=0)
         
@@ -560,12 +545,6 @@ class IFigLFP(QtWidgets.QWidget):
         self.SWR_valid = np.array(())
         self.DS_train = np.zeros(len(self.lfp_time))
         self.SWR_train = np.zeros(len(self.lfp_time))
-        self.SZR_train = np.zeros(len(self.lfp_time))
-        for iseq in self.seizures:
-            self.SZR_train[iseq] = 1
-        try: self.seizures_mid = np.array(list(map(pyfx.Center, self.seizures)))
-        except: self.seizures_mid = np.array(())
-    
     
     def update_event_items(self, event='all'):
         """
@@ -574,7 +553,6 @@ class IFigLFP(QtWidgets.QWidget):
         2) User switches between probes
         3) User adds or removes an event instance
         """
-        #findme
         if (event in ['all','ds']) and (self.DS_ALL is not None):
             DS_DF = self.DS_ALL[self.DS_ALL.ch == self.hil_chan]
             # valid events are either 1) auto-detected and non-user-removed or 2) user-added
@@ -591,7 +569,6 @@ class IFigLFP(QtWidgets.QWidget):
             self.SWR_train[:] = 0
             self.SWR_train[SWR_DF['idx'].values] = SWR_DF['status'].values
         
-    
     def channel_changed(self, theta_chan, ripple_chan, hil_chan):
         """ Update currently selected event channels """
         self.event_channels = [theta_chan, ripple_chan, hil_chan]
@@ -600,7 +577,6 @@ class IFigLFP(QtWidgets.QWidget):
         self.update_event_items()  # set DS/SWR indices for new channel
         self.plot_lfp_data()
     
-    
     def event_jump(self, sign, event):
         """ Set plot index to the next (or previous) instance of a given event """
         # get idx for given event type, return if empty
@@ -608,35 +584,28 @@ class IFigLFP(QtWidgets.QWidget):
             idx = self.DS_idx if self.SHOW_DS_RM else self.DS_valid
         elif event == 'swr': 
             idx = self.SWR_idx if self.SHOW_SWR_RM else self.SWR_valid
-        elif event == 'szr': 
-            idx = np.array(self.seizures_mid)
         if len(idx) == 0: return
-        
         # find nearest event preceding (sign==0) or following (1) current idx
         i = self.iw.i.val
         idx_next = idx[idx < i][::-1] if sign==0 else idx[idx > i]
         if len(idx_next) == 0: return
-        
         # set index slider to next event (automatically updates plot)
         self.iw.i.set_val(idx_next[0])
     
-    
     def point_jump(self, val, unit):
-        """ Set plot index to the given index or timepoint  """
+        """ Shift viewing window to the given index or timepoint  """
         if   unit == 't' : new_idx = pyfx.IdxClosest(val, self.lfp_time)
         elif unit == 'i' : new_idx = val
         self.iw.i.set_val(new_idx)
     
-        
     def plot_lfp_data(self, x=None):
-        """ Update LFP signals on graph """
+        """ Update LFP signals and event annotations on central plot """
         self.ax.clear()
         i,iwin = self.iw.i.val, self.iw.iwin.val
         idx = np.arange(i-iwin, i+iwin)
         x = self.lfp_time[idx]
-        arr = self.DATA['raw']#[self.shank_channels, :] # NEWSHANK
+        arr = self.DATA['raw']#[self.shank_channels, :]
         self.iw.i.nsteps = int(iwin/2)
-        #self.ax.plot(x, self.AUX[idx] + 1, color='blue')
         
         # scale signals based on y-slider value
         if   self.iw.ycoeff.val < -1 : coeff = 1/np.abs(self.iw.ycoeff.val) * 2
@@ -645,28 +614,25 @@ class IFigLFP(QtWidgets.QWidget):
         #for irow,y in enumerate(arr):
         for irow in self.shank_channels:
             y = arr[irow]
-            
             clr = self.ch_cmap.get(irow, 'black')
             if isinstance(clr, pd.Series): clr = clr.values[0]
-            # plot LFP signals (-y + irow, then invert y-axis)
+            # plot LFP signals (y - irow, set tick labels to show absolute values)
             if self.NOISE_TRAIN[irow] == 1:
                 self.ax.plot(x, np.repeat(-irow, len(x)), color='lightgray', label=str(irow), lw=2)
             else:
                 self.ax.plot(x, y[idx]*coeff - irow, color=clr, label=str(irow), lw=1)
-        #self.ax.invert_yaxis()
         
         # mark ripple/DS events with red/green lines
         if self.SHOW_DS:
             ds_ii = np.where(self.DS_train[idx] != 0)[0]
-            
+            linekw = dict(color='red', lw=2, zorder=5, alpha=0.4)
             for ds_time, status in zip(x[ds_ii], self.DS_train[idx][ds_ii]):
                 if status == 1:
-                    self.ax.axvline(ds_time, color='red', lw=2, zorder=-5, alpha=0.4)
+                    self.ax.axvline(ds_time, **linekw)
                 elif status == 2:
-                    self.ax.axvline(ds_time, color='red', lw=2, ls=':', zorder=-5, alpha=0.4)
+                    self.ax.axvline(ds_time, ls=':', **linekw)
                 elif self.SHOW_DS_RM:
-                    self.ax.axvline(ds_time, color='red', lw=2, ls='--', zorder=-5, alpha=0.4)
-                    
+                    self.ax.axvline(ds_time, ls='--', **linekw)
         if self.SHOW_SWR:
             swr_times = x[np.where(self.SWR_train[idx] > 0)[0]]
             for swrt in swr_times:
@@ -675,25 +641,19 @@ class IFigLFP(QtWidgets.QWidget):
                 swr_rm_times = x[np.where(self.SWR_train[idx] < 0)[0]]
                 for swrrt in swr_rm_times:
                     self.ax.axvline(swrrt, color='green', ls='--', zorder=-5, alpha=0.4)
-                    
-        if self.SHOW_SZR:
-            szr_seqs = [self.lfp_time[seq] for seq in map(lambda x: np.intersect1d(x, idx), 
-                                                          self.seizures) if len(seq) > 0]
-            for seq in szr_seqs:
-                self.ax.axvspan(*pyfx.Edges(seq), color='purple', zorder=-6, alpha=0.2)
         self.ax.set(xlabel='Time (s)', ylabel='channel index')
         self.ax.set_xmargin(0.01)
-        self.ax.set_ymargin(0.05)
+        self.ax.set_ymargin(0.01)
         
         if self.canvas_freq.isVisible():
             self.plot_freq_band_pwr()
         
-        #yticks = np.array([y for y in self.ax.get_yticks() if pyfx.InRange(y, *self.ax.get_ybound())])
-        yticks = -np.array(self.shank_channels)# NEWSHANK
+        yticks = -np.array(self.shank_channels)
         _ = self.ax.set_yticks(yticks, labels=np.int16(abs(yticks)).astype('str'))
         self.canvas.draw_idle()
         
     def closeEvent(self, event):
+        """ Close plots """
         plt.close()
         event.accept()
         
@@ -712,9 +672,9 @@ class IFigEvent(QtWidgets.QWidget):
         
         # initialize params from input arguments
         self.ch = ch
-        self.channels = channels # NEWSHANK shank_channels
+        self.channels = channels # shank_channels
         self.ch2irow = pd.Series(np.arange(len(channels)), index=channels)
-        self.DF_ALL = DF_ALL
+        self.DF_ALL = DF_ALL[DF_ALL['is_valid']==1]
         self.DATA = DATA
         self.lfp_time = lfp_time
         self.lfp_fs = lfp_fs
@@ -724,7 +684,6 @@ class IFigEvent(QtWidgets.QWidget):
         
         # get LFP and DF for the primary channel
         self.LFP_arr = self.DATA['raw']
-        # NEWSHANK
         self.ich = int(self.ch2irow[ch])
         self.LFP = self.LFP_arr[self.ich]
         self.EVENT_NOISE_TRAIN = kwargs.get('EVENT_NOISE_TRAIN', np.zeros(len(self.channels), dtype='int'))
@@ -769,14 +728,14 @@ class IFigEvent(QtWidgets.QWidget):
         self.toolbar.setOrientation(QtCore.Qt.Vertical)
         self.toolbar.setMaximumWidth(30)
         self.layout = QtWidgets.QHBoxLayout(self)
+        self.layout.setContentsMargins(0,0,0,0)
         self.layout.addWidget(self.toolbar, stretch=0)
         self.layout.addWidget(self.canvas, stretch=2)
         
         self.connect_mpl_widgets()
         
         self.update_twin(twin)
-    
-    
+        
     def create_subplots(self, twin=0.2):
         """ Set up grid of data and widget subplots """
         # create subplots
@@ -795,15 +754,14 @@ class IFigEvent(QtWidgets.QWidget):
         self.ax.set_xmargin(0.01)
         
         self.EXCLUDE_NOISE=True
+        
         ###   PLOT EVENTS FROM ALL CHANNELS   ###
         _ = ephys.plot_channel_events(self.DF_ALL, self.DF_MEAN,
                                       self.axs['gax0'], self.axs['gax1'], self.axs['gax2'],
-                                      pal=self.pal, noise_train=self.EVENT_NOISE_TRAIN, # NEWSHANK
+                                      pal=self.pal, noise_train=self.EVENT_NOISE_TRAIN,
                                       exclude_noise=bool(self.EXCLUDE_NOISE), CHC=self.CHC)
             
         # initial colormap
-        
-        # NEWSHANK
         self.ch_gax0_artists = pd.Series(list(self.axs['gax0'].patches), index=self.channels) # bars
         collections = np.array([None] * len(self.channels)).astype('object')
         collections[self.DF_MEAN.n_valid > 0] = list(self.axs['gax1'].collections)
@@ -860,8 +818,10 @@ class IFigEvent(QtWidgets.QWidget):
         
     
     def connect_mpl_widgets(self):
+        """ Connect keyboard/mouse inputs """
+        
         def on_press(event):
-            """ Update current event with left/right arrow keys """
+            """ Left/right arrows -> iterate over individual event dataset """
             if self.FLAG == 1:
                 i = self.iw.idx.val  # index of current event
                 if event.key == 'left' and i > 0:
@@ -869,6 +829,26 @@ class IFigEvent(QtWidgets.QWidget):
                 elif event.key == 'right' and i < len(self.iev)-1: 
                     self.iw.idx.set_val(i+1)  # next event
         self.cid = self.canvas.mpl_connect("key_press_event", on_press)
+        
+        def on_click(event):
+            """ Copy index of individual waveforms to view in main window """
+            if event.xdata is None: return
+            if event.button == matplotlib.backend_bases.MouseButton.RIGHT:
+                if self.FLAG == 0: return
+                menu = QtWidgets.QMenu()
+                # copy timestamp or recording index to clipboard
+                copyTAction = menu.addAction('Copy time point')
+                copyIAction = menu.addAction('Copy index')
+                idx = self.iev[self.iw.idx.val]
+                tpoint = round(self.lfp_time[idx], 2)
+                # execute menu
+                res = menu.exec_(event.guiEvent.globalPos())
+                if res == copyTAction:
+                    QtWidgets.QApplication.clipboard().setText(str(tpoint))
+                elif res == copyIAction:
+                    QtWidgets.QApplication.clipboard().setText(str(idx))
+                self.canvas.draw_idle()
+        self.cid2 = self.canvas.mpl_connect("button_press_event", on_click)
         
         
     def update_twin(self, twin):
@@ -891,7 +871,7 @@ class IFigEvent(QtWidgets.QWidget):
                 yerrs, _ = ephys.getyerrs(lfp_arr, mode='sem')
                 self.EY = pyfx.Limit(np.concatenate(yerrs), pad=0.05)
             else:
-                waves = [ephys.getavg(self.LFP_arr[self.ch2irow[xch]], # NEWSHANK
+                waves = [ephys.getavg(self.LFP_arr[self.ch2irow[xch]],
                                       np.atleast_1d(self.DF_ALL.loc[xch].idx),
                                       self.iwin) for xch in self.CH_ON_PLOT]
                 self.EY = pyfx.Limit(np.concatenate(waves), pad=0.05)
@@ -1001,7 +981,7 @@ class IFigEvent(QtWidgets.QWidget):
         
         if len(self.iev) == 0: return
         
-        ### average waveform(s)
+        ### plot average waveform(s)
         if self.FLAG == 0:
             # plot mean waveform for primary channel
             lfp_arr = ephys.getwaves(self.LFP, self.iev, self.iwin)
@@ -1143,8 +1123,7 @@ class IFigSWR(IFigEvent):
                 feat_items.append(dur_line)
         self.canvas.draw_idle()
     
-        
-
+    
 class IFigDS(IFigEvent):
     """ Figure displaying dentate spike events """
     
@@ -1156,6 +1135,7 @@ class IFigDS(IFigEvent):
                       half_width='{half_width:.2f} ms', width_height='{width_height:.2f} mV')
     
     def create_subplots(self, **kwargs):
+        """ Add artists to subplots """
         super().create_subplots(**kwargs)
         
         def toggle_data(label):
@@ -1290,7 +1270,7 @@ class EventViewPopup(QtWidgets.QDialog):
         
         
     def toggle_plot_mode(self, btn, chk):
-        """ Switch between figure views """
+        """ Switch between "average" and "individual" viewing modes """
         if not chk:
             return
         mode = btn.group().id(btn)  # 0=average waveform, 1=individual events
@@ -1370,55 +1350,12 @@ class EventViewWidget(QtWidgets.QFrame):
         
         self.vlay = QtWidgets.QVBoxLayout()
         self.vlay.setSpacing(10)
-        
-        gbox_ss = ('QGroupBox {'
-                   'border : 1px solid gray;'
-                   'border-radius : 8px;'
-                   'font-size : 16pt;'
-                   'font-weight : bold;'
-                   'margin-top : 10px;'
-                   'padding : 10px 5px 10px 5px;'
-                   '}'
-                   
-                   'QGroupBox::title {'
-                   'subcontrol-origin : margin;'
-                   'subcontrol-position : top left;'
-                   'padding : 2px 5px;' # top, right, bottom, left
-                   '}')
-        
-        mode_btn_ss = ('QPushButton {'
-                       'background-color : whitesmoke;'
-                       'border : 2px outset gray;'
-                       'border-radius : 2px;'
-                       'color : black;'
-                       'padding : 3px;'
-                       'font-weight : bold;'
-                       '}'
-                       
-                       'QPushButton:pressed {'
-                       'background-color : dimgray;'
-                       'border : 2px inset gray;'
-                       'color : white;'
-                       '}'
-                       
-                       'QPushButton:checked {'
-                       'background-color : darkgray;'
-                       'border : 2px inset gray;'
-                       'color : black;'
-                       '}'
-                       
-                       'QPushButton:disabled {'
-                       'background-color : gainsboro;'
-                       'border : 2px outset darkgray;'
-                       'color : gray;'
-                       '}'
-                       
-                       'QPushButton:disabled:checked {'
-                       'background-color : darkgray;'
-                       'border : 2px inset darkgray;'
-                       'color : dimgray;'
-                       '}'
-                       )
+        # stylesheets
+        gbox_ss = pyfx.dict2ss(QSS.EVENT_SETTINGS_GBOX)
+        mode_btn_cdict = dict(QSS.INSET_BTN)
+        mode_btn_cdict['QPushButton'].update({'background-color' : 'whitesmoke',
+                                              'border-width' : '2px'})
+        mode_btn_ss = pyfx.dict2ss(mode_btn_cdict)
         
         ###   VIEW PLOT ITEMS
         self.view_gbox = QtWidgets.QGroupBox('VIEW')
@@ -1534,11 +1471,9 @@ class EventViewWidget(QtWidgets.QFrame):
                 self.feat_vbox.addWidget(chk)
             elif category == 'reference':
                 self.ref_vbox.addWidget(chk)
-        
 
 class ChannelSelectionWidget(QtWidgets.QFrame):
-    """ Settings widget for main channel selection GUI """
-    
+    """ Settings widget for main analysis GUI """
     ch_signal = QtCore.pyqtSignal(int, int, int)  # user changed event channel
     noise_signal = QtCore.pyqtSignal(np.ndarray)  # user changed noise channels
     
@@ -1546,64 +1481,16 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         super().__init__(parent)
         
         self.ddir = ddir
-        
-        gbox_ss_main = ('QGroupBox {'
-                        'background-color : rgba(220,220,220,100);'  # gainsboro
-                        'border : 2px solid darkgray;'
-                        'border-top : 5px double black;'
-                        'border-radius : 6px;'
-                        'border-top-left-radius : 1px;'
-                        'border-top-right-radius : 1px;'
-                        'font-size : 16pt;'
-                        'font-weight : bold;'
-                        'margin-top : 10px;'
-                        'padding : 2px;'
-                        'padding-bottom : 10px;'
-                        '}'
-                       
-                        'QGroupBox::title {'
-                        'background-color : palette(button);'
-                        #'border-radius : 4px;'
-                        'subcontrol-origin : margin;'
-                        'subcontrol-position : top center;'
-                        'padding : 1px 4px;' # top, right, bottom, left
-                        '}')
-        
-        qlist_ss_main = ('QListWidget {'
-                         'background-color : rgba(255,255,255,50);'
-                         #'background-color : rgba(220,220,220,100);'  # gainsboro
-                         'border : 2px groove rgb(150,150,150);'
-                         'border-radius : 2px;'
-                         'padding : 0px;'
-                         '}'
-                      
-                        'QListWidget::item {'
-                        'background-color : rgb(255,255,255);'
-                        'color : black;'
-                        'border : 1px solid rgb(200,200,200);'
-                        'border-radius : 1px;'
-                        'padding : 4px;'
-                        '}'
-                      
-                        'QListWidget::item:selected {'
-                        'background-color : rgba(85,70,160,200);'
-                        
-                        'color : white;'
-                        #'background-color : rgba(179,179,191);'
-                        '}')
-                      
         self.settings_layout = QtWidgets.QVBoxLayout(self)
         self.settings_layout.setSpacing(10)
         
         ###   TOGGLE PROBES   ###
         
-        # toggle between probes
-        
-        # NEWSHANK
+        # toggle between probes and shanks
         qlists = []
         for _ in range(2):
             qlist = QtWidgets.QListWidget()
-            qlist.setStyleSheet(qlist_ss_main)
+            qlist.setStyleSheet(pyfx.dict2ss(QSS.QLIST))
             qlist.setFocusPolicy(QtCore.Qt.NoFocus)
             qlist.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
             qlist.setSizeAdjustPolicy(qlist.AdjustToContents)
@@ -1632,7 +1519,7 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         ######################################################
         ######################################################
         
-        
+        #  Events tab
         self.tab1 = QtWidgets.QFrame()
         self.tab1.setObjectName('tab1')
         self.tab1.setFrameShape(QtWidgets.QFrame.Box)
@@ -1647,174 +1534,46 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         
         self.plot_freq_pwr = gi.ShowHideBtn(init_show=False)
         self.plot_freq_pwr.setAutoDefault(False)
-        #self.plot_freq_pwr.setStyleSheet('QPushButton {padding : 5px 10px;}')
-        self.plot_freq_pwr.setStyleSheet('QPushButton {'
-                                          'background-color : whitesmoke;'
-                                          'border : 2px outset gray;'
-                                          'color : black;'
-                                          'image : url(:/icons/double_chevron_left.png);'
-                                          'image-position : left;'
-                                          'padding : 10px 5px;'
-                                          '}'
-                                          
-                                        'QPushButton:checked {'
-                                        'background-color : gainsboro;'
-                                        'border : 2px inset gray;'
-                                        'image : url(:/icons/double_chevron_right.png);'
-                                        '}'
-                                        )
+        self.plot_freq_pwr.setStyleSheet(pyfx.dict2ss(QSS.FREQ_TOGGLE_BTN))
         self.plot_freq_pwr.setLayoutDirection(QtCore.Qt.LeftToRight)
         
         ###   EVENT WIDGETS   ###
         
-        cline_ss = ('QLabel {'
-                    'border : 1px solid transparent;'
-                    'border-bottom : 3px solid %s;'
-                    'max-height : 2px;'
-                    '}')
         # hilus channel widgets
-        self.ds_gbox = QtWidgets.QGroupBox('DG SPIKES')
-        self.ds_gbox.setStyleSheet(gbox_ss_main)
-        ds_lay = pyfx.InterWidgets(self.ds_gbox, 'v')[2]
-        ds_lay.setSpacing(5)
-        ds_row1 = QtWidgets.QHBoxLayout()
-        self.hil_lbl = QtWidgets.QLabel('Hilus channel:')
-        self.hil_input = gi.ReverseSpinBox()
-        self.ds_reset = QtWidgets.QPushButton('\u27F3')
-        ds_row1.addWidget(self.hil_lbl)
-        ds_row1.addWidget(self.hil_input)
-        ds_row1.addWidget(self.ds_reset)
-        # buttons
-        ds_row2 = QtWidgets.QHBoxLayout()
-        self.ds_event_btn = QtWidgets.QPushButton('View DS')
-        self.ds_event_btn.setAutoDefault(False)
-        ds_row2.addWidget(self.ds_event_btn)
-        
-        ds_row3 = QtWidgets.QVBoxLayout()
-        ds_row3_0 = QtWidgets.QHBoxLayout()
-        ds_row3_0.setSpacing(10)
-        ds_row3_0.setContentsMargins(0,0,0,0)
-        self.ds_show = QtWidgets.QPushButton()
-        self.ds_arrows = gi.EventArrows()
-        self.ds_add = QtWidgets.QCheckBox('Add')
-        self.ds_add.setLayoutDirection(QtCore.Qt.RightToLeft)
-        self.ds_show_rm = QtWidgets.QCheckBox('Show deleted events')
-        self.ds_show_rm.setChecked(False)
-        ds_vline1, ds_vline2 = pyfx.DividerLine('v'), pyfx.DividerLine('v')
-        ds_row3_0.addWidget(self.ds_show)
-        ds_row3_0.addWidget(ds_vline1)
-        ds_row3_0.addWidget(self.ds_arrows)
-        ds_row3_0.addWidget(ds_vline2)
-        ds_row3_0.addWidget(self.ds_add)
-        ds_row3.addLayout(ds_row3_0)
-        ds_row3.addWidget(self.ds_show_rm)
-        # colorcode
-        ds_cc = QtWidgets.QLabel()
-        ds_cc.setStyleSheet(cline_ss % 'red')
-        ds_lay.addSpacing(10)
-        ds_lay.addLayout(ds_row1)
-        ds_lay.addLayout(ds_row2)
-        ds_lay.addLayout(ds_row3)
-        ds_lay.addWidget(ds_cc)
+        self.ds_gbox = gi.EventGroupbox('ds')
+        self.hil_input = self.ds_gbox.chan_input
+        self.ds_reset = self.ds_gbox.chan_reset
+        self.ds_event_btn = self.ds_gbox.chan_event_btn
+        self.ds_show = self.ds_gbox.chan_show
+        self.ds_arrows = self.ds_gbox.chan_arrows
+        self.ds_add = self.ds_gbox.chan_add
+        self.ds_show_rm = self.ds_gbox.chan_show_rm
         
         # ripple channel widgets
-        self.ripple_gbox = QtWidgets.QGroupBox('RIPPLES')
-        self.ripple_gbox.setStyleSheet(gbox_ss_main)
-        swr_lay = pyfx.InterWidgets(self.ripple_gbox, 'v')[2]
-        swr_lay.setSpacing(5)
-        swr_row1 = QtWidgets.QHBoxLayout()
-        self.swr_lbl = QtWidgets.QLabel('Ripple channel:')
-        self.swr_input = gi.ReverseSpinBox()
-        self.swr_reset = QtWidgets.QPushButton('\u27F3')
-        swr_row1.addWidget(self.swr_lbl)
-        swr_row1.addWidget(self.swr_input)
-        swr_row1.addWidget(self.swr_reset)
-        # buttons
-        swr_row2 = QtWidgets.QHBoxLayout()
-        self.swr_event_btn = QtWidgets.QPushButton('View ripples')
-        self.swr_event_btn.setAutoDefault(False)
-        swr_row2.addWidget(self.swr_event_btn)
-        swr_row3 = QtWidgets.QVBoxLayout()
-        swr_row3_0 = QtWidgets.QHBoxLayout()
-        swr_row3_0.setSpacing(10)
-        swr_row3_0.setContentsMargins(0,0,0,0)
-        self.swr_show = QtWidgets.QPushButton()
-        self.swr_arrows = gi.EventArrows()
-        self.swr_add = QtWidgets.QCheckBox('Add')
-        self.swr_add.setLayoutDirection(QtCore.Qt.RightToLeft)
-        self.swr_show_rm = QtWidgets.QCheckBox('Show deleted events')
-        self.swr_show_rm.setChecked(False)
-        swr_vline1, swr_vline2 = pyfx.DividerLine('v'), pyfx.DividerLine('v')
-        swr_row3_0.addWidget(self.swr_show)
-        swr_row3_0.addWidget(swr_vline1)
-        swr_row3_0.addWidget(self.swr_arrows)
-        swr_row3_0.addWidget(swr_vline2)
-        swr_row3_0.addWidget(self.swr_add)
-        swr_row3.addLayout(swr_row3_0)
-        swr_row3.addWidget(self.swr_show_rm)
-        # colorcode
-        swr_cc = QtWidgets.QLabel()
-        swr_cc.setStyleSheet(cline_ss % 'green')
-        swr_lay.addSpacing(10)
-        swr_lay.addLayout(swr_row1)
-        swr_lay.addLayout(swr_row2)
-        swr_lay.addLayout(swr_row3)
-        swr_lay.addWidget(swr_cc)
+        self.ripple_gbox = gi.EventGroupbox('swr')
+        self.swr_input = self.ripple_gbox.chan_input
+        self.swr_reset = self.ripple_gbox.chan_reset
+        self.swr_event_btn = self.ripple_gbox.chan_event_btn
+        self.swr_show = self.ripple_gbox.chan_show
+        self.swr_arrows = self.ripple_gbox.chan_arrows
+        self.swr_add = self.ripple_gbox.chan_add
+        self.swr_show_rm = self.ripple_gbox.chan_show_rm
         
         # theta channel widgets
-        self.theta_gbox = QtWidgets.QGroupBox('THETA')
-        self.theta_gbox.setStyleSheet(gbox_ss_main)
-        theta_lay = pyfx.InterWidgets(self.theta_gbox, 'v')[2]
-        theta_lay.setSpacing(5)
-        theta_row1 = QtWidgets.QHBoxLayout()
-        self.theta_lbl = QtWidgets.QLabel('Theta channel:')
-        self.theta_input = gi.ReverseSpinBox()
-        self.theta_reset = QtWidgets.QPushButton('\u27F3')
-        theta_row1.addWidget(self.theta_lbl)
-        theta_row1.addWidget(self.theta_input)
-        theta_row1.addWidget(self.theta_reset)
-        # buttons
-        theta_row2 = QtWidgets.QHBoxLayout()
-        self.theta_event_btn = QtWidgets.QPushButton('View theta')
+        self.theta_gbox = gi.EventGroupbox('theta')
+        self.theta_input = self.theta_gbox.chan_input
+        self.theta_reset = self.theta_gbox.chan_reset
+        self.theta_event_btn = self.theta_gbox.chan_event_btn
         self.theta_event_btn.setEnabled(False)
-        theta_row2.addWidget(self.theta_event_btn)
-        # colorcode
-        theta_cc = QtWidgets.QLabel()
-        theta_cc.setStyleSheet(cline_ss % 'blue')
-        theta_lay.addSpacing(10)
-        theta_lay.addLayout(theta_row1)
-        theta_lay.addLayout(theta_row2)
-        theta_lay.addWidget(theta_cc)
-        # set min/max channel values
-        self.ch_inputs = [self.theta_input, self.swr_input, self.hil_input]
-        for sbox in self.ch_inputs:
-            sbox.setKeyboardTracking(False)
-        for reset_btn in [self.ds_reset, self.swr_reset, self.theta_reset]:
-            reset_btn.setStyleSheet('QPushButton {font-size:25pt; padding:0px 0px 2px 2px;}')
-            reset_btn.setMaximumSize(20,20)
-            reset_btn.setAutoDefault(False)
-        for show_btn in [self.ds_show, self.swr_show]:
-            show_btn.setCheckable(True)
-            show_btn.setChecked(True)
-            show_btn.setAutoDefault(False)
-            show_btn.setStyleSheet('QPushButton {'
-                                   'background-color : whitesmoke;'
-                                   'border : 2px outset gray;'
-                                   'image : url(:/icons/show_outline.png);'
-                                   '}'
-                                   
-                                   'QPushButton:checked {'
-                                   'background-color : gainsboro;'
-                                   'border : 2px inset gray;'
-                                   'image : url(:/icons/hide_outline.png);'
-                                   '}')
+        
         # set channels
+        self.ch_inputs = [self.theta_input, self.swr_input, self.hil_input]
         self.set_channel_values(*event_channels)
         
         self.vlay.addWidget(self.plot_freq_pwr, stretch=0)
-        self.vlay.addWidget(self.ds_gbox, stretch=2)
-        self.vlay.addWidget(self.ripple_gbox, stretch=2)
-        self.vlay.addWidget(self.theta_gbox, stretch=1)
+        self.vlay.addWidget(self.ds_gbox, stretch=3)
+        self.vlay.addWidget(self.ripple_gbox, stretch=3)
+        self.vlay.addWidget(self.theta_gbox, stretch=2)
         
         
         ######################################################
@@ -1823,7 +1582,7 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         ######################################################
         ######################################################
         
-        
+        # Recording tab
         self.tab2 = QtWidgets.QFrame()
         self.tab2.setObjectName('tab2')
         self.tab2.setFrameShape(QtWidgets.QFrame.Box)
@@ -1866,25 +1625,10 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         # noise_hdr.addWidget(self.save_noise_btn)
         # QList of channels currently designated as "noisy"
         self.noise_qlist = QtWidgets.QListWidget()
-        self.noise_qlist.setStyleSheet(qlist_ss_main)
+        self.noise_qlist.setStyleSheet(pyfx.dict2ss(QSS.QLIST))
         self.noise_qlist.setFocusPolicy(QtCore.Qt.NoFocus)
         self.noise_qlist.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.noise_qlist.setSizeAdjustPolicy(self.noise_qlist.AdjustToContents)
-        
-        # self.noise_qlist.setStyleSheet('QListWidget {'
-        #                                           #'background-color : rgba(255,255,255,50);'
-        #                                           'border : 2px solid gray;'
-        #                                           'padding : 0px;'
-        #                                           '}'
-                                                  
-        #                                           'QListWidget::item {'
-        #                                           'border : 2px solid rgb(200,200,200);'
-        #                                           #'border-radius : 1px;'
-        #                                           #'min-height : 12px;'
-        #                                           #'max-height : 12px;'
-        #                                           'padding : 5px;'
-        #                                           '}'
-        #                                           )
         # noise widget
         self.ch_noise_widget = gi.AddChannelWidget(add_btn_pos='left')
         self.ch_noise_widget.label.hide()
@@ -1941,40 +1685,6 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         self.vlay2.addWidget(self.noise_gbox, stretch=0)
         self.vlay2.addWidget(self.notes_gbox, stretch=2)
         
-        
-        ######################################################
-        ######################################################
-        ############           TAB 3              ############
-        ######################################################
-        ######################################################
-        
-        
-        self.tab3 = QtWidgets.QFrame()
-        self.tab3.setObjectName('tab3')
-        self.tab3.setFrameShape(QtWidgets.QFrame.Box)
-        self.tab3.setFrameShadow(QtWidgets.QFrame.Raised)
-        self.tab3.setLineWidth(2)
-        self.tab3.setMidLineWidth(2)
-        self.tab_widget.addTab(self.tab3, 'Seizures')
-        self.vlay3 = QtWidgets.QVBoxLayout(self.tab3)
-        self.vlay3.setSpacing(10)
-        
-        ###   SEIZURE WIDGET   ###
-        
-        # seizures
-        self.szr_gbox = QtWidgets.QGroupBox()
-        szr_row = QtWidgets.QGridLayout(self.szr_gbox)
-        self.szr_show = QtWidgets.QRadioButton('Show seizures')
-        self.szr_arrows = gi.EventArrows()
-        self.szr_arrows.setEnabled(False)
-        self.szr_elim = QtWidgets.QPushButton('X')
-        self.szr_elim.setMaximumWidth(self.szr_elim.minimumSizeHint().height())
-        self.szr_elim.setEnabled(False)
-        szr_row.addWidget(self.szr_show, 0, 0)
-        szr_row.addWidget(self.szr_elim, 0, 1)
-        szr_row.addWidget(self.szr_arrows, 1, 0, 1, 2)
-        self.vlay3.addWidget(self.szr_gbox, stretch=0)
-        
         # save changes
         bbox = QtWidgets.QVBoxLayout()
         bbox.setSpacing(2)
@@ -1989,29 +1699,21 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         self.debug_btn.setAutoDefault(False)
         bbox.addWidget(self.save_btn)
         #bbox.addWidget(self.debug_btn)
-        
-        self.settings_layout.addLayout(qlist_hlay, stretch=0)  # NEWSHANK
+        self.settings_layout.addLayout(qlist_hlay, stretch=0)
         self.settings_layout.addWidget(self.tab_widget, stretch=2)
         self.settings_layout.addLayout(bbox, stretch=0)
     
-    
     def set_channel_values(self, theta_chan, ripple_chan, hil_chan):
-        """ Update channel selection widgets """
-        # NEWSHANK
+        """ Update event channel inputs """
         pyfx.stealthy(self.theta_input, theta_chan)
         pyfx.stealthy(self.swr_input, ripple_chan)
         pyfx.stealthy(self.hil_input, hil_chan)
-        #self.theta_input.setValue(theta_chan)
-        #self.swr_input.setValue(ripple_chan)
-        #self.hil_input.setValue(hil_chan)
-    
     
     def emit_ch_signal(self):
         """ Emit signal with all 3 current event channels """
         event_channels = [int(item.value()) for item in self.ch_inputs]
         self.ch_signal.emit(*event_channels)
         #self.disable_event_noise()
-    
     
     def get_item_channels(self, qwidget):
         """ Get all items in a QListWidget or a QComboBox
@@ -2022,7 +1724,6 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
             qitems = [qwidget.model().item(i) for i in range(qwidget.count())]
         qch = np.array([int(item.text()) for item in qitems], dtype='int')
         return np.arange(len(qitems)), np.array(qitems), qch
-
 
     def clean2noise(self):
         """ Label current channel in dropdown menu as "noisy" """
@@ -2037,7 +1738,6 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
             self.noise_qlist.insertItem(bisect.bisect(qlist_ch, ch), str(ch))
         self.emit_noise_signal()
     
-    
     def noise2clean(self):
         """ Restore selected channel(s) in noise list as "clean" """
         dropdown_ch = self.get_item_channels(self.clean_dropdown)[-1]
@@ -2048,7 +1748,6 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
                 self.noise_qlist.takeItem(i)
                 self.clean_dropdown.insertItem(bisect.bisect(dropdown_ch, ch), str(ch))
         self.emit_noise_signal()
-    
     
     @QtCore.pyqtSlot(int, np.ndarray)
     def update_noise_from_plot(self, ch, noise_train):
@@ -2065,7 +1764,7 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
             self.noise2clean_btn.click()
     
     def init_shanks(self, shank_list, ishank):
-        # NEWSHANK
+        """ Update the available shanks to match the current probe """
         self.shanks_qlist.blockSignals(True)
         self.shanks_qlist.clear()
         items = [f'shank {i}' for i in range(len(shank_list))]
@@ -2078,7 +1777,7 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         self.set_event_range(shank_channels)
         
     def set_event_range(self, shank_channels):
-        # NEWSHANK
+        """ Restrict event channel inputs to the current shank  """
         for sbox in self.ch_inputs:
             sbox.blockSignals(True)
             sbox.setRange(min(shank_channels), max(shank_channels))
@@ -2095,7 +1794,6 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         self.disable_event_noise()
         self.emit_noise_signal()
     
-    
     def disable_event_noise(self):
         """ Block current event channels from being annotated as "noise" """
         event_channels = [int(item.value()) for item in self.ch_inputs]
@@ -2106,7 +1804,6 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
                 # reset dropdown if current item is an event channel
                 self.clean_dropdown.setCurrentIndex(-1)
 
-    
     def emit_noise_signal(self):
         """ Emit signal with updated noise train """
         qlist_ch = self.get_item_channels(self.noise_qlist)[-1]
@@ -2117,6 +1814,7 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
     
     # self-contained notes saving
     def export_notes(self):
+        """ Save contents of the "Notes" field to disk """
         txt = self.notes_qedit.toPlainText()
         ephys.write_notes(Path(self.ddir,'notes.txt'), txt)
         print('Notes saved!')
@@ -2127,25 +1825,27 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
 class ChannelSelectionWindow(QtWidgets.QDialog):
     """ Main channel selection GUI """
     
-    def __init__(self, ddir, probe_list, iprb=0, ishank=0, parent=None):
+    def __init__(self, ddir, iprb=0, ishank=0, parent=None):
         super().__init__(parent)
         qrect = pyfx.ScreenRect(perc_width=0.9)
         self.setGeometry(qrect)
         
-        self.init_data(ddir, probe_list, iprb, ishank)
+        self.init_data(ddir, iprb, ishank)
         self.init_figs()
         self.gen_layout()
         self.connect_signals()
         
         # update window title
-        title = f'{os.path.basename(self.ddir)}'
-        self.setWindowTitle(title)
+        folder = os.path.basename(self.ddir)
+        parent_folder = os.path.basename(os.path.dirname(self.ddir))
+        self.setWindowTitle(str(os.path.join(parent_folder, folder)))
     
-    def init_data(self, ddir, probe_list, iprb, ishank=0):
+    def init_data(self, ddir, iprb, ishank=0):
         """ Initialize all recording variables """
         self.ddir = ddir
-        self.probe_list = probe_list
-        # NEWSHANK
+        self.probe_group = ephys.read_probe_group(ddir)
+        self.probe_list = self.probe_group.probes
+        self.iprobes = list(range(len(self.probe_list)))
         self.probe_shank_list = []
         for prb in self.probe_list:
             # initialize list of separate shanks within probe
@@ -2157,19 +1857,26 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         self.PARAMS = ephys.load_recording_params(ddir)
         
         # load LFP signals, event dfs, and detection thresholds for all probes
-        self.data_list, self.lfp_time, self.lfp_fs = ephys.load_lfp(ddir, '', -1)
-        self.swr_list = [x[0] for x in ephys.load_event_dfs(ddir, 'swr', -1)]
-        self.swr_list_orig = deepcopy(self.swr_list)  # originally loaded version 
-        self.swr_list_file = deepcopy(self.swr_list)  # version saved to file
-        self.ds_list = [x[0] for x in ephys.load_event_dfs(ddir, 'ds', -1)]
-        self.ds_list_orig = deepcopy(self.ds_list)
-        self.ds_list_file = deepcopy(self.ds_list)
-        self.threshold_list = list(np.load(Path(ddir, 'THRESHOLDS.npy'), allow_pickle=True))
-        self.noise_list = ephys.load_noise_channels(ddir, -1)
-        self.noise_list_orig = deepcopy(self.noise_list)
-        self.std_list = ephys.csv2list(ddir, 'channel_bp_std')
+        dmode = dp.validate_processed_ddir(ddir)
+        if dmode == 1: # load HDF5 files
+            self.FF = h5py.File(Path(ddir, 'DATA.hdf5'), 'r+')
+            self.lfp_fs = self.FF.attrs['lfp_fs']
+            self.lfp_time = ephys.load_h5_array(self.FF, 'lfp_time', in_memory=True)
+            self.data_list = [ephys.load_h5_lfp(self.FF, iprb=i) for i in self.iprobes]
+            self.swr_list = [ephys.load_h5_event_df(self.FF, 'swr', i)[0] for i in self.iprobes]
+            self.ds_list = [ephys.load_h5_event_df(self.FF, 'ds', i)[0] for i in self.iprobes]
+            self.threshold_list = [ephys.load_h5_thresholds(self.FF, i) for i in self.iprobes]
+            self.noise_list = [ephys.load_h5_array(self.FF, 'NOISE', i, in_memory=True) for i in self.iprobes]
+            self.std_list = [ephys.load_h5_df(self.FF, 'STD', i) for i in self.iprobes]
+        elif dmode == 2:  # load NPZ and CSV files
+            self.FF = None
+            self.data_list, self.lfp_time, self.lfp_fs = ephys.load_lfp(ddir, '', -1)
+            self.swr_list = [x[0] for x in ephys.load_csv_event_dfs(ddir, 'swr', -1)]
+            self.ds_list = [x[0] for x in ephys.load_csv_event_dfs(ddir, 'ds', -1)]
+            self.threshold_list = list(np.load(Path(ddir, 'THRESHOLDS.npy'), allow_pickle=True))
+            self.noise_list = ephys.load_noise_channels(ddir, -1)
+            self.std_list = ephys.csv2list(ddir, 'channel_bp_std')
         self.NTS = len(self.lfp_time)
-        
         self.aux_array = ephys.load_aux(ddir)
         if len(self.aux_array) > 0:
             self.AUX = self.aux_array[0]
@@ -2177,55 +1884,42 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         else:
             self.AUX = np.full(self.NTS, np.nan)
             self.AUX_TRAIN = np.full(self.NTS, np.nan)
-            #ilsr = np.nonzero(AUX)[0]
-            #seqs = pyfx.get_sequences(np.nonzero(AUX)[0])
-        #self.seizures, _, _ = ephys.load_seizures(ddir)
-        
-        self.event_channel_list = []      # loaded/estimated event channels
-        self.event_channel_list_file = [] # event channels saved to file (if any)
-        # NEWSHANK
-        for _iprb,prb in enumerate(self.probe_list):
-            probe_shank_event_channels = ephys.load_event_channels(ddir, _iprb, ishank=-1)
-            self.event_channel_list_file.append(list(probe_shank_event_channels))
-            for _ishank, shank in enumerate(self.probe_shank_list[_iprb]):
-                if len(probe_shank_event_channels[_ishank]) != 3:
-                    # estimate event channels from data
-                    shank_channels = shank.get_indices()
-                    STD = self.std_list[_iprb].loc[shank_channels]
-                    rel_noise_idx = np.nonzero(self.noise_list[_iprb][shank_channels])[0]
+        # load individual event channels for each probe/shank combination
+        self.event_channel_list = [ephys.load_event_channels(ddir, i) for i in self.iprobes]
+        for i,l in enumerate(self.event_channel_list):
+            for ii,ll in enumerate(l):
+                if ll == [None,None,None]:
+                    shank_ch = self.probe_list[i].get_shanks()[ii].get_indices()
+                    STD = self.std_list[i].loc[shank_ch]
+                    DS_MEAN = ephys.get_mean_event_df(self.ds_list[i], self.std_list[i]).loc[shank_ch]
+                    rel_noise_idx = np.nonzero(self.noise_list[i][shank_ch])[0]
                     itheta = ephys.estimate_theta_chan(STD, noise_idx=rel_noise_idx)
                     iripple = ephys.estimate_ripple_chan(STD, noise_idx=rel_noise_idx)
-                    ihil = ephys.estimate_hil_chan(self.data_list[_iprb]['swr'][shank_channels, :],
-                                                   noise_idx=rel_noise_idx)
-                    llist = [shank_channels[ii] for ii in [itheta, iripple, ihil]]
-                    probe_shank_event_channels[_ishank] = llist
-            self.event_channel_list.append(probe_shank_event_channels)
+                    ihil = ephys.estimate_hil_chan(DS_MEAN, noise_idx=rel_noise_idx)
+                    llist = [shank_ch[iii] for iii in [itheta, iripple, ihil]]
+                    self.event_channel_list[i][ii] = llist
         self.orig_event_channel_list = deepcopy(self.event_channel_list)
         
-        # select initial probe data
+        # initialize probe data
         self.load_probe_data(iprb, ishank)
 
-
     def load_probe_data(self, iprb, ishank):
-        """ Set data corresponding to the given probe """
+        """ Update data for selected probe """
         self.iprb = iprb
         self.probe = self.probe_list[iprb]
-        self.DATA = dict(self.data_list[iprb])
+        self.DATA = self.data_list[iprb]
         self.SWR_ALL = pd.DataFrame(self.swr_list[iprb])
         self.DS_ALL = pd.DataFrame(self.ds_list[iprb])
         self.SWR_THRES, self.DS_THRES = dict(self.threshold_list[iprb]).values()
         self.STD = pd.DataFrame(self.std_list[iprb])
         self.NOISE_TRAIN = np.array(self.noise_list[iprb])
-        self.seizures, _, _ = ephys.load_iis(self.ddir, iprb)
-        
-        # NEWSHANK
         self.probe_shanks = self.probe_shank_list[iprb]
-        self.probe_event_channels = list(self.event_channel_list[iprb]) # [[theta_shank0,ripple_shank0,hil_shank0], [theta_shank1...]]
+        self.probe_event_channels = list(self.event_channel_list[iprb])
         self.load_shank_data(ishank)
         ##############
     
     def load_shank_data(self, ishank):
-        # NEWSHANK
+        """ Update data for selected shank """
         self.ishank = ishank
         self.shank = self.probe_shanks[ishank]
         # load event channels for current shank
@@ -2234,41 +1928,36 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         self.orig_theta_chan, self.orig_ripple_chan, self.orig_hil_chan = self.orig_event_channel_list[self.iprb][ishank]
         
     def SWITCH_THE_PROBE(self, idx):
+        """ Update main plot and sidebar with a different probe """
         # save dataframe with added/removed events
         self.swr_list[self.iprb] = pd.DataFrame(self.main_fig.SWR_ALL)
         self.ds_list[self.iprb]  = pd.DataFrame(self.main_fig.DS_ALL)
         
-        # NEWSHANK: probe=self.probe --> shank=self.shank
         self.load_probe_data(idx, ishank=0)
         kwargs = dict(shank=self.shank, DATA=self.DATA, event_channels=self.event_channels, 
                       DS_ALL=self.DS_ALL, SWR_ALL=self.SWR_ALL, STD=self.STD, 
-                      NOISE_TRAIN=self.NOISE_TRAIN, seizures=self.seizures, SWR_THRES=self.SWR_THRES)
+                      NOISE_TRAIN=self.NOISE_TRAIN, SWR_THRES=self.SWR_THRES)
         self.main_fig.switch_the_probe(**kwargs)
         
         self.widget.init_shanks(self.probe_shanks, self.ishank)
         ##############
-        
         self.widget.set_channel_values(*self.event_channels)
         self.widget.set_noise_channels(self.NOISE_TRAIN)
-        self.widget.tab_widget.setTabVisible(2, len(self.seizures) > 0)
-        
         
     def SWITCH_THE_SHANK(self, idx):
-        # NEWSHANK
+        """ Update main plot and sidebar with a different shank on the same probe """
         self.load_shank_data(idx)
         self.main_fig.switch_the_shank(shank=self.shank, event_channels=self.event_channels)
         
         self.widget.set_event_range(self.shank.get_indices())
         self.widget.set_channel_values(*self.event_channels)
     
-    
     def init_figs(self):
         """ Create main figure, initiate event channel update """
-        # NEWSHANK: probe=self.probe --> shank=self.shank
         kwargs = dict(shank=self.shank, DATA=self.DATA, lfp_time=self.lfp_time, lfp_fs=self.lfp_fs, 
                       PARAMS=self.PARAMS, event_channels=self.event_channels, 
                       DS_ALL=self.DS_ALL, SWR_ALL=self.SWR_ALL, STD=self.STD, 
-                      NOISE_TRAIN=self.NOISE_TRAIN, seizures=self.seizures, SWR_THRES=self.SWR_THRES,
+                      NOISE_TRAIN=self.NOISE_TRAIN, SWR_THRES=self.SWR_THRES,
                       AUX=self.AUX)
         
         # set up figures
@@ -2283,9 +1972,6 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         self.widget = ChannelSelectionWidget(self.ddir, self.NTS, self.lfp_time, self.lfp_fs, self.event_channels)
         self.widget.setStyleSheet('QWidget:focus {outline : none;}')
         self.widget.setMaximumWidth(250)
-        has_szr = bool(len(self.seizures) > 0)
-        self.widget.tab_widget.setTabVisible(2, has_szr)
-        
         self.widget.tab_widget.setCurrentIndex(0)
         
         # update probe list in settings widget
@@ -2294,8 +1980,6 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         self.widget.probes_qlist.setCurrentRow(self.iprb)
         row_height = self.widget.probes_qlist.sizeHintForRow(0)
         self.widget.probes_qlist.setMaximumHeight(row_height * 2 + 5)
-        
-        # NEWSHANK
         # update shank list in settings widget
         self.widget.shanks_qlist.setMaximumHeight(row_height * 2 + 5)
         self.widget.init_shanks(self.probe_shanks, self.ishank)
@@ -2314,8 +1998,9 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         
         
     def connect_signals(self):
+        """ Connect GUI inputs """
         self.widget.probes_qlist.currentRowChanged.connect(self.SWITCH_THE_PROBE)
-        self.widget.shanks_qlist.currentRowChanged.connect(self.SWITCH_THE_SHANK) # NEWSHANK
+        self.widget.shanks_qlist.currentRowChanged.connect(self.SWITCH_THE_SHANK)
         # updated event channel inputs
         for item in self.widget.ch_inputs:
             item.valueChanged.connect(self.widget.emit_ch_signal)
@@ -2328,14 +2013,12 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         self.main_fig.updated_noise_signal.connect(self.widget.update_noise_from_plot)
         self.widget.clean2noise_btn.clicked.connect(self.widget.clean2noise)
         self.widget.noise2clean_btn.clicked.connect(self.widget.noise2clean)
-        self.widget.save_noise_btn.clicked.connect(lambda: print('save_noise_btn clicked'))
         self.widget.noise_signal.connect(self.update_noise_channels)
         
         # view popup windows
         self.widget.swr_event_btn.clicked.connect(self.view_swr)
         self.widget.ds_event_btn.clicked.connect(self.view_ds)
         # show event lines
-        self.widget.szr_show.toggled.connect(self.show_hide_events)
         self.widget.ds_show.toggled.connect(self.show_hide_events)
         self.widget.ds_show_rm.toggled.connect(self.show_hide_events)
         self.widget.swr_show.toggled.connect(self.show_hide_events)
@@ -2346,7 +2029,6 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         # show next/previous event
         self.widget.ds_arrows.bgrp.idClicked.connect(lambda x: self.main_fig.event_jump(x, 'ds'))
         self.widget.swr_arrows.bgrp.idClicked.connect(lambda x: self.main_fig.event_jump(x, 'swr'))
-        self.widget.szr_arrows.bgrp.idClicked.connect(lambda x: self.main_fig.event_jump(x, 'szr'))
         # toggle event type to add on double-click
         self.widget.ds_add.toggled.connect(lambda x: self.toggle_event_add(x, 'ds'))
         self.widget.swr_add.toggled.connect(lambda x: self.toggle_event_add(x, 'swr'))
@@ -2358,7 +2040,6 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         self.widget.debug_btn.clicked.connect(self.debug)
         self.widget.probes_qlist.setFocus(True)
     
-    
     def toggle_event_add(self, chk, event):
         """ Choose whether to add DS or SWR event on double-click """
         if event == 'ds' and chk:
@@ -2368,19 +2049,16 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         self.main_fig.ADD_DS = bool(self.widget.ds_add.isChecked())
         self.main_fig.ADD_SWR = bool(self.widget.swr_add.isChecked())
         
-        
     def show_hide_events(self):
         """ Set event markers visible or hidden """
         show_ds = bool(self.widget.ds_show.isChecked())         # show DS events
         show_ds_rm = bool(self.widget.ds_show_rm.isChecked())   # show deleted DS events
         show_swr = bool(self.widget.swr_show.isChecked())       # show SWR events
         show_swr_rm = bool(self.widget.swr_show_rm.isChecked()) # show deleted SWR events
-        show_szr = bool(self.widget.szr_show.isChecked())       # show seizures
         self.main_fig.SHOW_DS = bool(show_ds)
         self.main_fig.SHOW_DS_RM = bool(show_ds_rm)
         self.main_fig.SHOW_SWR = bool(show_swr)
         self.main_fig.SHOW_SWR_RM = bool(show_swr_rm)
-        self.main_fig.SHOW_SZR = bool(show_szr)
         
         self.widget.ds_arrows.setEnabled(show_ds)
         if not show_ds: self.widget.ds_add.setChecked(False)
@@ -2390,19 +2068,14 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         if not show_swr: self.widget.swr_add.setChecked(False)
         self.widget.swr_add.setEnabled(show_swr)
         self.widget.swr_show_rm.setEnabled(show_swr)
-        self.widget.szr_arrows.setEnabled(show_szr)
-        a = bool(self.main_fig.iw.i.val in self.main_fig.seizures_mid)
-        self.widget.szr_elim.setEnabled(bool(show_szr and a))
         
         self.main_fig.plot_lfp_data()
         
-    
     def toggle_main_plot(self, chk):
         """ Expand/hide frequency band plots """
         self.main_fig.canvas_freq.setVisible(chk)
         self.main_fig.plot_lfp_data()
         
-    
     def update_noise_channels(self, noise_train):
         """ Pass updated noise channel annotation to figure """
         self.main_fig.NOISE_TRAIN = np.array(noise_train)
@@ -2410,15 +2083,12 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         self.noise_list[self.iprb] = np.array(self.NOISE_TRAIN)
         self.main_fig.plot_lfp_data()
         
-    
     def update_event_channels(self, a, b, c):
         """ Pass updated event channels from settings widget to figure """
         self.main_fig.channel_changed(a,b,c)
         self.event_channels = self.main_fig.event_channels
-        # NEWSHANK
         self.probe_event_channels[self.ishank] = list(self.event_channels)
         self.event_channel_list[self.iprb] = list(self.probe_event_channels)
-        
         
     def reset_ch(self, k):
         """ User resets event channel to its original value """
@@ -2428,7 +2098,6 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
             self.widget.swr_input.setValue(self.orig_ripple_chan)
         elif k == 'ds':
             self.widget.hil_input.setValue(self.orig_hil_chan)
-        
         
     def view_swr(self):
         """ Launch ripple analysis popup """
@@ -2461,11 +2130,9 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
             self.swr_popup.evw.data_gbox.setEnabled(False)
             self.swr_popup.evw.sort_gbox.setEnabled(False)
         self.swr_popup.show()
-       
     
     def view_ds(self):
         """ Launch DS analysis popup """
-        # NEWSHANK
         HIL_CHAN = self.widget.hil_input.value()
         shank_channels = np.array(self.shank.get_indices())
         irows = np.nonzero(np.in1d(self.DS_ALL.ch, shank_channels))[0]
@@ -2494,63 +2161,52 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
             self.ds_popup.evw.data_gbox.setEnabled(False)
             self.ds_popup.evw.sort_gbox.setEnabled(False)
         self.ds_popup.show()
-        
     
     def save_channels(self):
-        """ Save event channels to .npy file """
-        # save dataframes listed by probe
+        """ Save event channels, datasets, and noise channels for current probe/shank """
+        # save event dataframes for the current probe
         self.swr_list[self.iprb] = pd.DataFrame(self.main_fig.SWR_ALL)
         self.ds_list[self.iprb]  = pd.DataFrame(self.main_fig.DS_ALL)
-        # update to match current file
-        self.swr_list_file[self.iprb] = pd.DataFrame(self.main_fig.SWR_ALL)
-        self.ds_list_file[self.iprb] = pd.DataFrame(self.main_fig.DS_ALL)
-        # load ALL_DS and ALL_SWR event dataframes, update with current probe
-        ALL_SWR = pd.concat(self.swr_list_file, keys=range(len(self.swr_list_file)), ignore_index=False)
-        ALL_DS = pd.concat(self.ds_list_file, keys=range(len(self.ds_list_file)), ignore_index=False)
-        ALL_SWR = ALL_SWR.drop('ch', axis=1)
-        ALL_DS = ALL_DS.drop('ch', axis=1)
-        ALL_SWR.to_csv(Path(self.ddir, 'ALL_SWR'), index_label=False)
-        ALL_DS.to_csv(Path(self.ddir, 'ALL_DS'), index_label=False)
-        
-        # get event channel list for current probe/shank
-        event_channels = list(self.event_channel_list[self.iprb][self.ishank]) # 3 event channels for current shank
-        self.event_channel_list_file[self.iprb][self.ishank] = event_channels  # update list to match file
-        probe_event_channels = list(self.event_channel_list_file[self.iprb])   # save with other shanks in probe
-        np.save(Path(self.ddir, f'theta_ripple_hil_chan_{self.iprb}.npy'), 
-                np.array(probe_event_channels, dtype='object'))
-        
-        # save event DFs for current probe
-        self.DS_ALL = pd.DataFrame(self.ds_list[self.iprb])
         self.SWR_ALL = pd.DataFrame(self.swr_list[self.iprb])
+        self.DS_ALL  = pd.DataFrame(self.ds_list[self.iprb])
+        if self.FF is not None:
+            ephys.save_h5_df(self.SWR_ALL.drop('ch', axis=1), self.FF, name='ALL_SWR', iprb=self.iprb)
+            ephys.save_h5_df(self.DS_ALL.drop('ch', axis=1), self.FF, name='ALL_DS', iprb=self.iprb)
+            self.FF[f'{self.iprb}']['NOISE'][:] = np.array(self.noise_list[self.iprb]) # save noise annotation
+        else:
+            for event,DF in zip(['swr','ds'], [self.SWR_ALL, self.DS_ALL]):
+                ephys.save_csv_event_dfs(self.ddir, event, DF, iprb=self.iprb)
+            np.save(Path(self.ddir, 'noise_channels.npy'), self.noise_list)
         
-        # concatenate event dataframes for each shank in a probe
-        PROBE_DS_ALL = pd.DataFrame()
-        PROBE_SWR_ALL = pd.DataFrame()
-        for ishk,llist in enumerate(probe_event_channels):
-            if len(llist)==0:
+        # save event channels for the current probe/shank
+        event_channels = list(self.event_channel_list[self.iprb][self.ishank]) # 3 event channels for current shank
+        self.orig_event_channel_list[self.iprb][self.ishank] = event_channels
+        ephys.save_event_channels(self.ddir, iprb=self.iprb, ishank=self.ishank, 
+                                  new_channels=event_channels)
+        
+        # update saved ripple/DS event dataframes with current datasets
+        probe_event_channels = ephys.load_event_channels(self.ddir, iprb=self.iprb)
+        PROBE_DS_ALL, PROBE_SWR_ALL = pd.DataFrame(), pd.DataFrame()
+        for ishank,llist in enumerate(probe_event_channels):
+            if llist == [None,None,None]:
                 continue
             _, ripple_chan, hil_chan = llist
             if hil_chan in self.DS_ALL.ch:
                 DS_DF = pd.DataFrame(self.DS_ALL.loc[hil_chan])
-                DS_DF['shank'] = ishk
+                DS_DF['shank'] = ishank
                 PROBE_DS_ALL = pd.concat([PROBE_DS_ALL, DS_DF], axis=0, ignore_index=True)
             if ripple_chan in self.SWR_ALL.ch:
                 SWR_DF = pd.DataFrame(self.SWR_ALL.loc[ripple_chan])
-                SWR_DF['shank'] = ishk
+                SWR_DF['shank'] = ishank
                 PROBE_SWR_ALL = pd.concat([PROBE_SWR_ALL, SWR_DF], axis=0, ignore_index=True)
         PROBE_DS_ALL.to_csv(Path(self.ddir, f'DS_DF_{self.iprb}'), index_label=False)
         PROBE_SWR_ALL.to_csv(Path(self.ddir, f'SWR_DF_{self.iprb}'), index_label=False)
         
-        # save noise annotation for current probe
-        np.save(Path(self.ddir, 'noise_channels.npy'), self.noise_list)
-        
         # pop-up messagebox appears when save is complete
-        msgbox = gi.MsgboxSave('Event channels saved!\nExit window?', parent=self)
-        res = msgbox.exec()
+        res = gi.MsgboxSave('Event channels saved!\nExit window?').exec()
         if res == QtWidgets.QMessageBox.Yes:
             self.widget.export_notes()  # automatically save notes
             self.accept()
-        
         
     def check_unsaved_notes(self):
         """ Check for notes updates, prompt user to save changes """
@@ -2560,7 +2216,7 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
             return True  # continue closing
         else:
             msg = 'Save changes to your notes?'
-            res = gi.MsgboxWarning.unsaved_changes_warning(msg=msg, sub_msg='', parent=self)
+            res = gi.MsgboxWarning.unsaved_changes_warning(msg=msg, sub_msg='')
             if res == False:
                 return False  # "Cancel" to abort closing attempt
             else:
@@ -2572,6 +2228,12 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         if self.check_unsaved_notes():
             super().reject()
     
+    def closeEvent(self, event):
+        plt.close()
+        if self.FF is not None:
+            self.FF.close()
+        event.accept()
+    
     def debug(self):
         pdb.set_trace()
         
@@ -2579,13 +2241,13 @@ def main(ddir=''):
     """ Run channel selection GUI """
     # allow user to select processed data folder
     if not dp.validate_processed_ddir(ddir):
-        dlg = gi.FileDialog(init_ddir=ephys.base_dirs()[0])
-        if not dlg.exec(): return None, None
-        ddir = str(dlg.directory().path())
-        if not dp.validate_processed_ddir(ddir): return None, None
-    # load probe group, launch window
-    probe_group = prif.read_probeinterface(Path(ddir, 'probe_group'))
-    w = ChannelSelectionWindow(ddir, probe_group.probes, 0)
+        ddir = ephys.select_directory(init_ddir=ephys.base_dirs()[0], 
+                                      title='Select recording folder')
+        if not ddir or not dp.validate_processed_ddir(ddir):
+            return None, None
+    
+    # launch window
+    w = ChannelSelectionWindow(ddir, 0)
     w.show()
     w.raise_()
     w.exec()
