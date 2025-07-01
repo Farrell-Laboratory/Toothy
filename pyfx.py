@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Useful functions for data handling and plotting tasks
+Utility functions
 
 @author: amandaschott
 """
 import sys
+import os
 import re
 import scipy
 import numpy as np
@@ -16,9 +17,13 @@ import matplotlib.pyplot as plt
 from PyQt5 import QtWidgets, QtCore, QtGui
 import pdb
 
-##################################################
-########         GENERAL FUNCTIONS        ########
-##################################################
+##############################################################################
+##############################################################################
+################                                              ################
+################               GENERAL FUNCTIONS              ################
+################                                              ################
+##############################################################################
+##############################################################################
 
 def IsNum(x):
     """ Return True if $x is numeric, False otherwise """
@@ -76,12 +81,10 @@ def Limit(collection, mode=2, pad=0.01, sign=1):
     elif mode==1 : return vmax
     elif mode==2 : return (vmin, vmax)
 
-
 def SymLimit(collection, pad=0.0):
     """ Return (negative, positive) maximum absolute value in collection """
     abs_max = np.nanmax(np.abs(MinMax(collection)))
     return (-abs_max, abs_max)
-
 
 def InRange(num, nmin, nmax):
     """ Return whether the value $num falls between (min, max) bounds """
@@ -90,7 +93,6 @@ def InRange(num, nmin, nmax):
 def AllInRange(collection, nmin, nmax):
     """ Return whether all values in $collection fall between (min, max) bounds """
     return (min(collection) >= nmin) and (max(collection) <= nmax)
-    
     
 def CenterWin(collection, n, total=True):
     """ Return window of $n values surrounding central point in collection """
@@ -126,9 +128,13 @@ def laser_start_end(laser, fs=1000., intval=5):
     return (istart, iend)
 
 
-##################################################
-########         SIGNAL PROCESSING        ########
-##################################################
+##############################################################################
+##############################################################################
+################                                              ################
+################               SIGNAL PROCESSING              ################
+################                                              ################
+##############################################################################
+##############################################################################
 
 
 def butter_bandpass(lowcut, highcut, lfp_fs, order=3):
@@ -146,9 +152,13 @@ def butter_bandpass_filter(data, lowcut, highcut, lfp_fs, order=3, axis=-1):
     return y
 
 
-##################################################
-########       MATPLOTLIB FUNCTIONS       ########
-##################################################
+##############################################################################
+##############################################################################
+################                                              ################
+################             MATPLOTLIB FUNCTIONS             ################
+################                                              ################
+##############################################################################
+##############################################################################
 
 
 def Cmap(data, cmap=plt.cm.coolwarm, norm_data=None, alpha=1.0, use_alpha=False):
@@ -164,6 +174,7 @@ def Cmap(data, cmap=plt.cm.coolwarm, norm_data=None, alpha=1.0, use_alpha=False)
     except:
         if use_alpha: return np.ones((len(data), 4))
         return np.ones((len(data), 4))
+
 
 def Cmap_columns(df, cols=[], white_cols=[], map_within=None, combine=False, **cmap_kw):
     """ Colormap values for each specified column ($cols) in dataframe $df
@@ -295,7 +306,6 @@ def hue(c, percent, mode=1, cscale=255, alpha=1, res='tuple'):
     elif res == 'hex' : return mcolors.to_hex(adj_c, keep_alpha=True)
     else              : return adj_c
     
-    
 def rand_hex(n=1, bright=True):
     """ Return $n random colors in HEX code format """
     hue = np.random.uniform(size=n)
@@ -336,9 +346,13 @@ def add_legend_items(leg, new_items):
     return leg
 
 
-##################################################
-########           PYQT WIDGETS           ########
-##################################################
+##############################################################################
+##############################################################################
+################                                              ################
+################                PYQT5 FUNCTIONS               ################
+################                                              ################
+##############################################################################
+##############################################################################
 
 
 def qapp():
@@ -375,29 +389,52 @@ def remove_items_from_layout(layout):
 def stealthy(widget, val):
     """ Lazy method for updating widgets without triggering signals  """
     widget.blockSignals(True)
-    try: widget.setValue(val)                     # spinbox value
+    try: widget.setValue(val)         # spinbox value
     except:
-        try: widget.setRange(*val)                # spinbox range
+        try: widget.setRange(*val)    # spinbox range
         except:
-            try: widget.setCurrentText(val)       # dropdown text
+            try: widget.addItems(val) # dropdown items
             except:
-                try: widget.setCurrentIndex(val)  # dropdown index
+                try: widget.setCurrentText(val)      # dropdown text
                 except:
-                    try: widget.setChecked(val)   # button checked
+                    try: widget.setCurrentIndex(val) # dropdown index
                     except:
-                        try: widget.setPlainText(val) # text edit content
+                        try: widget.setChecked(val)  # button checked
                         except:
-                            try: widget.setText(val)  # line edit content
+                            try: widget.setPlainText(val) # text edit content
                             except:
-                                print(f'Could not set value for widget {widget}')
+                                try: widget.setText(val)  # line edit content
+                                except:
+                                    print(f'Could not set value for widget {widget}')
     widget.blockSignals(False)
-    
+
+def unique_fname(ddir, base_name):
+    """ Append unique identifier to filename """
+    existing_files = os.listdir(ddir)
+    fname = str(base_name)
+    i = 1
+    while fname in existing_files:
+        new_name = fname + f' ({i})'
+        if new_name not in existing_files:
+            fname = str(new_name)
+            break
+        i += 1
+    return fname
+
 def get_widget_container(orientation, *widgets, widget='none', **kwargs):
     """ Organize $widgets in a QBoxLayout, optionally embedded in a parent widget """
+    
+    assert orientation in ['v','h'], f'Invalid orientation "{orientation}".'
     alignments, stretch_factors = [kwargs.get(k,[]) for k in ['alignments','stretch_factors']]
-    if   orientation=='v': layout = QtWidgets.QVBoxLayout() # vertical layout
-    elif orientation=='h': layout = QtWidgets.QHBoxLayout() # horizontal layout
-    layout.setContentsMargins(0,0,0,0)
+    cm = kwargs.get('cm', (0,0,0,0))
+    
+    def get_qboxlayout(orientation):
+        if orientation=='v': 
+            return QtWidgets.QVBoxLayout() # vertical layout
+        return QtWidgets.QHBoxLayout()     # horizontal layout
+    
+    layout = get_qboxlayout(orientation)
+    if cm is not None: layout.setContentsMargins(*cm)
     layout.setSpacing(kwargs.get('spacing', 1))
     for i,w in enumerate(widgets):
         ddict = {}  # set item stretch and alignment within container layout
@@ -417,24 +454,25 @@ def get_widget_container(orientation, *widgets, widget='none', **kwargs):
             return q  # embed layout within a QScrollArea
         else:
             return w  # embed layout within a QWidget or QFrame
+    elif widget == 'groupbox':
+        gbox = QtWidgets.QGroupBox()
+        if kwargs.get('inter', False):
+            gbox_lay = get_qboxlayout(orientation)
+            gbox_lay.setContentsMargins(0,0,0,0)
+            w = QtWidgets.QWidget()
+            w.setLayout(layout)
+            gbox_lay.addWidget(w)
+        else:
+            gbox_lay = layout
+        gbox.setLayout(gbox_lay)
+        return gbox  # embed layout withing a QGroupBox
     elif widget == 'dialog':
         dlg = QtWidgets.QDialog() # embed layout within a QDialog window
         dlg.setLayout(layout)
         return dlg
     else:
         return layout # return layout object
-
-class DividerLine(QtWidgets.QFrame):
-    """ Basic horizontal (or vertical) separator line """
-    def __init__(self, orientation='h', lw=3, mlw=3, parent=None):
-        super().__init__(parent)
-        if orientation == 'h':
-            self.setFrameShape(QtWidgets.QFrame.HLine)
-        else:
-            self.setFrameShape(QtWidgets.QFrame.VLine)
-        self.setFrameShadow(QtWidgets.QFrame.Sunken)
-        self.setLineWidth(lw)
-        self.setMidLineWidth(mlw)
+        
         
 def InterWidgets(parent, orientation='v'):
     """ Return layout with an intermediate widget between $parent and children """
@@ -449,6 +487,7 @@ def InterWidgets(parent, orientation='v'):
     interlayout.addWidget(interwidget)
     return interlayout, interwidget, layout
 
+
 def ScreenRect(perc_width=1, perc_height=1, keep_aspect=True):
     """ Return QRect with height/width scaled from screen geometry """
     qapp()
@@ -462,9 +501,17 @@ def ScreenRect(perc_width=1, perc_height=1, keep_aspect=True):
     qrect = QtCore.QRect(app_x, app_y, app_width, app_height)
     return qrect
 
-def get_ddir():
-    qapp()
-    res = QtWidgets.QFileDialog().getExistingDirectory(None, '', '', 
-                                                       QtWidgets.QFileDialog.DontUseNativeDialog)
-    return res
+
+class DividerLine(QtWidgets.QFrame):
+    """ Basic horizontal (or vertical) separator line """
+    
+    def __init__(self, orientation='h', lw=3, mlw=3, parent=None):
+        super().__init__(parent)
+        if orientation == 'h':
+            self.setFrameShape(QtWidgets.QFrame.HLine)
+        else:
+            self.setFrameShape(QtWidgets.QFrame.VLine)
+        self.setFrameShadow(QtWidgets.QFrame.Sunken)
+        self.setLineWidth(lw)
+        self.setMidLineWidth(mlw)
     
