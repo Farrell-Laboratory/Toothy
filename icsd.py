@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Created on Fri Jun  7 00:50:32 2024
-
-@author: amandaschott
-"""
-
 '''
 py-iCSD toolbox!
 Translation of the core functionality of the CSDplotter MATLAB package
@@ -45,7 +39,6 @@ import scipy
 import quantities as pq
 import neo
 import pdb
-
 
 #patch quantities with the SI unit Siemens if it does not exist
 lastdefinition = pq.A/pq.V
@@ -159,7 +152,7 @@ class CSD(object):
             denom_string = denom_string + '%.3f ' % i
         denom_string = denom_string + ']'
 
-        print(('discrete filter coefficients: \nb = {}, \na = {}'.format(num_string, denom_string)))
+        #print(('discrete filter coefficients: \nb = {}, \na = {}'.format(num_string, denom_string)))
 
         if filterfunction == 'filtfilt':
             return scipy.signal.filtfilt(num, denom, csd, axis=0) * csd.units
