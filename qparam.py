@@ -1,35 +1,28 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Mon Mar 10 08:58:32 2025
+Parameter management
 
 @author: amandaschott
 """
-import sys
 import os
-from pathlib import Path
-import scipy.io as so
-import numpy as np
-import pandas as pd
-import matplotlib
-import matplotlib.pyplot as plt
-import scipy
-import seaborn as sns
-import pickle
-import quantities as pq
 from PyQt5 import QtWidgets, QtCore
-from open_ephys.analysis import Session
-import probeinterface as prif
 import pdb
 # custom modules
 import pyfx
-import icsd
 
-###########################################################
-########            PARAMETER MANAGEMENT           ########
-###########################################################
+
+##############################################################################
+##############################################################################
+################                                              ################
+################             PARAMETER MANAGEMENT             ################
+################                                              ################
+##############################################################################
+##############################################################################
+
 
 def get_original_defaults():
+    """ Return default parameter dictionary """
     
     PARAMS = {
     'lfp_fs' : 1000.0,
@@ -75,6 +68,7 @@ def get_original_defaults():
 
 
 def get_param_info():
+    """ Return dictionary of parameter labels and descriptions """
 
     PARAM_INFO = {
         
@@ -124,38 +118,6 @@ def get_param_info():
     
     return PARAM_INFO
 
-
-def read_lines(filepath):
-    """ Read in parameter file lines, return dictionary of key:value pairs """
-    # strip whitespace and ignore lines beginning with comment (#)
-    with open(filepath, 'r') as f:
-        lines = [l.strip() for l in f.readlines()]
-    PARAMS = parse_lines(lines)
-    return PARAMS
-
-
-def parse_lines(lines):
-    PARAMS = {}
-    lines = [l for l in lines if not l.startswith('#') and len(l) > 0]
-    for line in lines:
-        d = line.split(';')[0]  # ";" is the end of the line
-        k,v = [x.strip() for x in d.split('=')]   # "=" splits keys and values
-        if v.startswith('[') and v.endswith(']'): # values in brackets are lists
-            val = []
-            for x in v[1:-1].split(','):
-                try: x2 = float(x.strip())
-                except: x2 = str(x.strip())
-                val.append(x2)
-            #val = [float(x.strip()) for x in v[1:-1].split(',')]
-        else:
-            try    : val = float(v)  # if value is numerical, store as float
-            except : val = str(v)    # otherwise, store as string
-        if   val == 'True'  : val = True  # convert "True"/"False" strings to boolean
-        elif val == 'False' : val = False
-        PARAMS[k] = val
-    return PARAMS
-
-
 def validate_params(ddict):
     """ Determine whether input $ddict is a valid parameter dictionary
     @Returns
@@ -199,8 +161,10 @@ def validate_params(ddict):
                   'swr_freq_thr' : is_number('swr_freq_thr'),
                   'swr_freq_win' : is_number('swr_freq_win'),
                   'swr_maxamp_win' : is_number('swr_maxamp_win'),
-                  'csd_method' : is_category('csd_method', ['standard','delta','step','spline']), 
-                  'f_type' : is_category('f_type', ['gaussian','identity','boxcar','hamming','triangular']),
+                  'csd_method' : is_category('csd_method', ['standard','delta',
+                                                            'step','spline']), 
+                  'f_type' : is_category('f_type', ['gaussian','identity','boxcar',
+                                                    'hamming','triangular']),
                   'f_order' : is_number('f_order'),
                   'f_sigma' : is_number('f_sigma'),
                   'vaknin_el' : is_category('vaknin_el', [True, False]), 
@@ -221,7 +185,6 @@ def validate_params(ddict):
     is_valid = bool(all(valid_ddict.values()))
     return is_valid, valid_ddict
 
-
 def fix_params(ddict, default_dict=None):
     """ Fill in missing/invalid parameters with default values """
     # set "default" values to use in place of missing/invalid parameters
@@ -240,13 +203,87 @@ def fix_params(ddict, default_dict=None):
     return new_dict
 
 
+##############################################################################
+##############################################################################
+################                                              ################
+################               PARAMETER FILE I/O             ################
+################                                              ################
+##############################################################################
+##############################################################################
 
-###########################################################
-########             PARAMETER WIDGETS             ########
-###########################################################
+
+def read_lines(filepath):
+    """ Read in parameter file lines, return dictionary of key:value pairs """
+    # strip whitespace and ignore lines beginning with comment (#)
+    with open(filepath, 'r') as f:
+        lines = [l.strip() for l in f.readlines()]
+    PARAMS = parse_lines(lines)
+    return PARAMS
+
+def parse_lines(lines):
+    """ Convert text lines to parameter dictionary """
+    PARAMS = {}
+    lines = [l for l in lines if not l.startswith('#') and len(l) > 0]
+    for line in lines:
+        d = line.split(';')[0]  # ";" is the end of the line
+        k,v = [x.strip() for x in d.split('=')]   # "=" splits keys and values
+        if v.startswith('[') and v.endswith(']'): # values in brackets are lists
+            val = []
+            for x in v[1:-1].split(','):
+                try: x2 = float(x.strip())
+                except: x2 = str(x.strip())
+                val.append(x2)
+            #val = [float(x.strip()) for x in v[1:-1].split(',')]
+        else:
+            try    : val = float(v)  # if value is numerical, store as float
+            except : val = str(v)    # otherwise, store as string
+        if   val == 'True'  : val = True  # convert "True"/"False" strings to boolean
+        elif val == 'False' : val = False
+        PARAMS[k] = val
+    return PARAMS
+
+def read_param_file(filepath='default_params.txt', exclude_fs=False, return_none=True):
+    """ Return dictionary of parameters loaded from .txt file """
+    try: # read in param file, parse lines and organize into key:value dictionary
+        assert os.path.exists(filepath) and os.path.isfile(filepath)
+        PARAMS = read_lines(filepath)
+    except:
+        return None, []
+   # check for missing/invalid parameters
+    is_valid, valid_ddict = validate_params(PARAMS)
+    if is_valid:
+        if exclude_fs: _ = PARAMS.pop('lfp_fs')
+        return PARAMS, []  # return parameter dictionary and empty list
+    else:
+        invalid_params = [k for k,v in valid_ddict.items() if v==False]
+        if return_none:  # return None and list of invalid parameters
+            return None, invalid_params  
+        else:            # return loaded params and list of invalid params
+            return PARAMS, invalid_params
+
+def write_param_file(PARAMS, filepath='default_params.txt'):
+    """ Write parameter dictionary to .txt file """
+    fid = open(filepath, 'w')
+    fid.write('###  PARAMETERS  ###' + os.linesep)
+    fid.write(os.linesep)
+    for k,v in PARAMS.items():
+        fid.write(f'{k} = {v};' + os.linesep)
+    fid.close()
+    return True
+
+
+##############################################################################
+##############################################################################
+################                                              ################
+################               PARAMETER WIDGETS              ################
+################                                              ################
+##############################################################################
+##############################################################################
 
 
 class Spinbox(QtWidgets.QDoubleSpinBox):
+    """ QDoubleSpinBox for numerical parameter values (e.g. detection thresholds) """
+    
     param_changed_signal = QtCore.pyqtSignal()
     
     def __init__(self, key, isvalid=True, parent=None):
@@ -259,20 +296,82 @@ class Spinbox(QtWidgets.QDoubleSpinBox):
         self.valueChanged.connect(self.param_changed_signal.emit)
     
     def set_widget_valid(self, x):
+        """ Update widget style sheet for valid or invalid value """
         self.isvalid = bool(x)
         ss = self.ss % [('red','transparent'),('white','black')][int(x)]
         self.setStyleSheet(ss)
     
     def get_param_value(self):
+        """ Return widget value """
         return self.value()
         
     def update_param(self, val):
+        """ Set widget value """
         self.blockSignals(True)
         self.setValue(val)
         self.blockSignals(False)
+        
+        
+class SpinboxRange(QtWidgets.QWidget):
+    """ Pair of QDoubleSpinBoxes for parameter ranges (e.g. frequency bands) """
+    
+    param_changed_signal = QtCore.pyqtSignal()
+    
+    def __init__(self, key, isvalid=True, double=False, alignment=QtCore.Qt.AlignLeft, 
+                 parent=None, **kwargs):
+        super().__init__(parent)
+        self.key = key
+        self.setObjectName(key)
+        self.isvalid = isvalid
+        if double:
+            self.box0 = QtWidgets.QDoubleSpinBox()
+            self.box1 = QtWidgets.QDoubleSpinBox()
+        else:
+            self.box0 = QtWidgets.QSpinBox()
+            self.box1 = QtWidgets.QSpinBox()
+        self.boxes = [self.box0, self.box1]
+        for box in self.boxes:
+            box.wheelEvent = lambda event: None
+            box.setAlignment(alignment)
+            if 'suffix' in kwargs: box.setSuffix(kwargs['suffix'])
+            if 'minimum' in kwargs: box.setMinimum(kwargs['minimum'])
+            if 'maximum' in kwargs: box.setMaximum(kwargs['maximum'])
+            if 'decimals' in kwargs: box.setDecimals(kwargs['decimals'])
+            if 'step' in kwargs: box.setSingleStep(kwargs['step'])
+            box.valueChanged.connect(lambda: self.param_changed_signal.emit())
+            
+        self.dash = QtWidgets.QLabel(' — ')
+        self.dash.setAlignment(QtCore.Qt.AlignCenter)
+        
+        self.layout = QtWidgets.QHBoxLayout(self)
+        self.layout.setContentsMargins(0,0,0,0)
+        self.layout.setSpacing(0)
+        self.layout.addWidget(self.box0, stretch=2)
+        self.layout.addWidget(self.dash, stretch=0)
+        self.layout.addWidget(self.box1, stretch=2)
+        self.ss = ('QAbstractSpinBox {background-color : %s; color : %s;}')
+    
+    def set_widget_valid(self, x):
+        """ Update widget style sheet for valid or invalid value """
+        self.isvalid = bool(x)
+        ss = self.ss % [('red','transparent'),('white','black')][int(x)]
+        self.setStyleSheet(ss)
+    
+    def get_param_value(self):
+        """ Return widget values """
+        return [self.box0.value(), self.box1.value()]
+    
+    def update_param(self, val):
+        """ Set widget values """
+        for i,val in enumerate(val):
+            self.boxes[i].blockSignals(True)
+            self.boxes[i].setValue(val)
+            self.boxes[i].blockSignals(False)
 
 
 class Combobox(QtWidgets.QComboBox):
+    """ QComboBox for categorical parameter values """
+    
     param_changed_signal = QtCore.pyqtSignal()
     
     def __init__(self, key, isvalid=True, parent=None):
@@ -312,62 +411,15 @@ class Combobox(QtWidgets.QComboBox):
         self.setCurrentText(txt)
         self.blockSignals(False)
 
-class SpinboxRange(QtWidgets.QWidget):
-    param_changed_signal = QtCore.pyqtSignal()
-    
-    def __init__(self, key, isvalid=True, double=False, alignment=QtCore.Qt.AlignLeft, parent=None, **kwargs):
-        super().__init__(parent)
-        self.key = key
-        self.setObjectName(key)
-        self.isvalid = isvalid
-        if double:
-            self.box0 = QtWidgets.QDoubleSpinBox()
-            self.box1 = QtWidgets.QDoubleSpinBox()
-        else:
-            self.box0 = QtWidgets.QSpinBox()
-            self.box1 = QtWidgets.QSpinBox()
-        self.boxes = [self.box0, self.box1]
-        for box in self.boxes:
-            box.wheelEvent = lambda event: None
-            box.setAlignment(alignment)
-            if 'suffix' in kwargs: box.setSuffix(kwargs['suffix'])
-            if 'minimum' in kwargs: box.setMinimum(kwargs['minimum'])
-            if 'maximum' in kwargs: box.setMaximum(kwargs['maximum'])
-            if 'decimals' in kwargs: box.setDecimals(kwargs['decimals'])
-            if 'step' in kwargs: box.setSingleStep(kwargs['step'])
-            box.valueChanged.connect(lambda: self.param_changed_signal.emit())
-            
-        self.dash = QtWidgets.QLabel(' — ')
-        self.dash.setAlignment(QtCore.Qt.AlignCenter)
-        
-        self.layout = QtWidgets.QHBoxLayout(self)
-        self.layout.setContentsMargins(0,0,0,0)
-        self.layout.setSpacing(0)
-        self.layout.addWidget(self.box0, stretch=2)
-        self.layout.addWidget(self.dash, stretch=0)
-        self.layout.addWidget(self.box1, stretch=2)
-        self.ss = ('QAbstractSpinBox {background-color : %s; color : %s;}')
-    
-    def set_widget_valid(self, x):
-        self.isvalid = bool(x)
-        ss = self.ss % [('red','transparent'),('white','black')][int(x)]
-        self.setStyleSheet(ss)
-    
-    def get_param_value(self):
-        return [self.box0.value(), self.box1.value()]
-    
-    def update_param(self, val):
-        for i,val in enumerate(val):
-            self.boxes[i].blockSignals(True)
-            self.boxes[i].setValue(val)
-            self.boxes[i].blockSignals(False)
-
 
 class ParamObject(QtWidgets.QWidget):
+    """ QWidget containing input widgets for all or a subset of parameters """
+    
     update_signal = QtCore.pyqtSignal(dict, list)
     
     def __init__(self, params={}, mode='all', parent=None):
         """
+        params: dictionary of initial parameter values
         mode: set visible parameters for different analysis modes
             'signal_processing': LFP downsampling and filtering params
             'ds_detection': thresholds for detecting DS events
@@ -391,17 +443,8 @@ class ParamObject(QtWidgets.QWidget):
         self.update_gui_from_ddict(params)
         self.connect_signals()
         
-        # self.setStyleSheet('QWidget {'
-        #                    'font-size : 15pt;'
-        #                    '}'
-        #                    'QToolTip {'
-        #                    'background-color : lightyellow;'
-        #                    'border : 2px solid black;'
-        #                    'font-size : 15pt;'
-        #                    'padding : 4px;'
-        #                    '}')
-        
     def gen_layout(self):
+        """ Set up layout """
         self.setContentsMargins(0,0,15,0)
         
         ####################
@@ -413,7 +456,8 @@ class ParamObject(QtWidgets.QWidget):
         self.lfp_fs.setDecimals(1)
         self.lfp_fs.setSingleStep(0.5)
         self.lfp_fs.setSuffix(' Hz')
-        self.trange = SpinboxRange(key='trange', double=True, decimals=0, maximum=999999, suffix=' s')
+        self.trange = SpinboxRange(key='trange', double=True, decimals=0, 
+                                   maximum=999999, suffix=' s')
         self.trange.box1.setMinimum(-1)
         kwargs = dict(double=True, decimals=1, step=0.5, maximum=999999, suffix=' Hz')
         self.theta = SpinboxRange(key='theta', **kwargs)
@@ -513,14 +557,13 @@ class ParamObject(QtWidgets.QWidget):
         self.el_h = Spinbox(key='el_h')
         self.el_h.setDecimals(1)
         self.el_h.setSuffix(' \u00B5m')
-        
         for sbox in [self.lfp_fs, self.ds_height_thr, self.ds_dist_thr, self.ds_prom_thr, self.ds_wlen, 
                      self.swr_ch_bound, self.swr_height_thr, self.swr_min_thr, self.swr_dist_thr, 
                      self.swr_min_dur, self.swr_freq_thr, self.swr_freq_win, self.swr_maxamp_win,
                      self.f_order, self.f_sigma, self.tol, self.src_diam, self.src_h, self.cond,
                      self.cond_top, self.nclusters, self.eps, self.min_clus_samples, self.el_area, self.el_h]:
             sbox.setMaximum(999999)
-            
+        # organize widgets by analysis step
         tups = [(self.lfp_fs, 'signal_processing'),
                 (self.trange, 'signal_processing'),
                 (self.theta, 'signal_processing'),
@@ -601,6 +644,7 @@ class ParamObject(QtWidgets.QWidget):
             self.vlay.addWidget(row)
     
     def connect_signals(self):
+        """ Connect GUI inputs """
         for widget in self.WIDGETS.values():
             widget.param_changed_signal.connect(self.emit_signal)
             
@@ -618,41 +662,8 @@ class ParamObject(QtWidgets.QWidget):
                 invalid.append(key)
         return ddict, invalid
     
-    def emit_signal(self, *args):
-        
-        # A) user toggles widget -> that param is no longer invalid
-        # B) user uploads a new set of params -> validity depends on the content
-        # * try to prevent emit_signal during B
-        self.sender().set_widget_valid(True)
-        PARAMS, invalid = self.ddict_from_gui()
-        
-        
-        self.update_signal.emit(PARAMS, invalid)
-    
-    def set_mode(self, mode='all'):
-        if mode not in self.mode2key: mode = 'all'
-        self.KEYS = list(self.mode2key[mode])
-        
-        # show parameter rows for the given mode, hide the rest
-        for k,row in self.ROWS.items():
-            row.setVisible(k in self.KEYS)
-        QtCore.QTimer.singleShot(50, self.adjust_labels)
-        
-    def adjust_labels(self):
-        # set text label widths to the longest visible QLabel
-        qlabels = [self.ROWS[mk].findChild(QtWidgets.QLabel) for mk in self.KEYS]
-        mw = max([ql.width() for ql in qlabels])
-        for ql in qlabels:
-            ql.setAlignment(QtCore.Qt.AlignCenter)
-            ql.setFixedWidth(mw)
-    
-    def init_widgets(self):
-        func = lambda x: (lambda k,w: (w, self.DEFAULTS[k]))(*x)
-        for item,val in map(func, self.WIDGETS.items()):
-            item.update_param(val)
-            item.set_widget_valid(True)
-
     def update_gui_from_ddict(self, ddict):#, block=False):
+        """ Set GUI widget values from parameter dictionary """
         self.DDICT_ORIG = dict(ddict)
         # check for valid $ddict values for each current param (e.g. lfp_fs:False, trange=True)
         valid_ddict = {k:b for k,b in validate_params(ddict)[1].items() if k in self.KEYS}
@@ -664,6 +675,37 @@ class ParamObject(QtWidgets.QWidget):
             item.set_widget_valid(valid_ddict[key])
             #if block: item.blockSignals(False)
     
-    def debug(self):
-        pdb.set_trace()
+    def emit_signal(self, *args):
+        """ Emit current parameter dictionary and validity of each value """
+        # A) user toggles widget -> that param is no longer invalid
+        # B) user uploads a new set of params -> validity depends on the content
+        # * try to prevent emit_signal during B
+        self.sender().set_widget_valid(True)
+        PARAMS, invalid = self.ddict_from_gui()
+        self.update_signal.emit(PARAMS, invalid)
     
+    def set_mode(self, mode='all'):
+        """ Show input widgets for the given parameter mode """
+        if mode not in self.mode2key: mode = 'all'
+        self.KEYS = list(self.mode2key[mode])
+        
+        # show parameter rows for the given mode, hide the rest
+        for k,row in self.ROWS.items():
+            row.setVisible(k in self.KEYS)
+        QtCore.QTimer.singleShot(50, self.adjust_labels)
+        
+    def adjust_labels(self):
+        """ Align text labels """
+        # set text label widths to the longest visible QLabel
+        qlabels = [self.ROWS[mk].findChild(QtWidgets.QLabel) for mk in self.KEYS]
+        mw = max([ql.width() for ql in qlabels])
+        for ql in qlabels:
+            ql.setAlignment(QtCore.Qt.AlignCenter)
+            ql.setFixedWidth(mw)
+    
+    def init_widgets(self):
+        """ Initialize widget values from default parameter dictionary """
+        func = lambda x: (lambda k,w: (w, self.DEFAULTS[k]))(*x)
+        for item,val in map(func, self.WIDGETS.items()):
+            item.update_param(val)
+            item.set_widget_valid(True)
