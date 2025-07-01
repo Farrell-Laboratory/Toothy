@@ -1,31 +1,29 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Tue Aug  6 21:25:32 2024
+Toothy home interface
 
 @author: amandaschott
 """
 import sys
 import os
 from pathlib import Path
-import numpy as np
-import pandas as pd
 from PyQt5 import QtWidgets, QtCore
-import probeinterface as prif
 import pdb
 # set app folder as working directory
 app_ddir = Path(__file__).parent
 os.chdir(app_ddir)
 # import custom modules
+import QSS
 import pyfx
-import qparam
 import ephys
-import selection_popups as sp
 import gui_items as gi
-from probe_handler import probegod
-from channel_selection_gui import ChannelSelectionWindow
-from ds_classification_gui import DS_CSDWindow
-    
+from gui_items import BaseFolderPopup, ParameterPopup
+from probe_handler import ProbeObjectPopup
+from raw_data_pipeline import RawRecordingSelectionPopup
+from processed_data_hub import ProcessedRecordingSelectionPopup
+
+
 class toothy(QtWidgets.QMainWindow):
     resize_signal = QtCore.pyqtSignal(object)
     
@@ -35,9 +33,9 @@ class toothy(QtWidgets.QMainWindow):
         if not os.path.exists('default_folders.txt'):
             ephys.init_default_folders()
         ephys.clean_base_dirs()
-        data_path, probe_path, probe_file, param_file = ephys.base_dirs()
-        self.init_raw_ddir = str(data_path)
-        self.init_processed_ddir = str(data_path)
+        
+        self.init_raw_ddir = None
+        self.init_processed_ddir = None
         
         self.gen_layout()
         self.connect_signals()
@@ -47,78 +45,36 @@ class toothy(QtWidgets.QMainWindow):
         self.probe_popup      = None
         self.rawdata_popup    = None
         self.analysis_popup   = None
-        self.ch_selection_dlg = None
-        self.classify_ds_dlg  = None
         
         self.show()
         self.center_window()
         
-    
     def gen_layout(self):
         """ Set up layout """
         self.setWindowTitle('Toothy')
         self.setContentsMargins(25,25,25,25)
-        
         self.centralWidget = QtWidgets.QWidget()
         self.centralLayout = QtWidgets.QVBoxLayout(self.centralWidget)
         self.centralLayout.setSpacing(20)
         
-        mode_btn_ss = ('QPushButton {'
-                       'background-color : gainsboro;'
-                       'border : 3px outset gray;'
-                       'border-radius : 2px;'
-                       'color : black;'
-                       'padding : 4px;'
-                       'font-weight : bold;'
-                       '}'
-                       
-                       'QPushButton:pressed {'
-                       'background-color : dimgray;'
-                       'border : 3px inset gray;'
-                       'color : white;'
-                       '}'
-                       
-                       'QPushButton:checked {'
-                       'background-color : darkgray;'
-                       'border : 3px inset gray;'
-                       'color : black;'
-                       '}'
-                       
-                       'QPushButton:disabled {'
-                       'background-color : gainsboro;'
-                       'border : 3px outset darkgray;'
-                       'color : gray;'
-                       '}'
-                       
-                       'QPushButton:disabled:checked {'
-                       'background-color : darkgray;'
-                       'border : 3px inset darkgray;'
-                       'color : dimgray;'
-                       '}'
-                       )
-        
         # create main buttons
         self.base_folder_btn = QtWidgets.QPushButton('Base folders')
-        self.base_folder_btn.setStyleSheet(mode_btn_ss)
         self.view_params_btn = QtWidgets.QPushButton('View parameters')
-        self.view_params_btn.setStyleSheet(mode_btn_ss)
-        self.probe_btn =  QtWidgets.QPushButton('Create probe')
-        self.probe_btn.setStyleSheet(mode_btn_ss)
+        self.probe_btn = QtWidgets.QPushButton('Create probe')
         self.process_btn = QtWidgets.QPushButton('Process raw data')
-        self.process_btn.setStyleSheet(mode_btn_ss)
         self.analyze_btn = QtWidgets.QPushButton('Analyze data')
-        self.analyze_btn.setStyleSheet(mode_btn_ss)
-        
-        self.centralLayout.addWidget(self.base_folder_btn)
-        self.centralLayout.addWidget(self.view_params_btn)
-        self.centralLayout.addWidget(self.probe_btn)
-        self.centralLayout.addWidget(self.process_btn)
-        self.centralLayout.addWidget(self.analyze_btn)
-        
+        self.home_btns = [self.base_folder_btn, # update data/probe/param files
+                          self.view_params_btn, # edit param values
+                          self.probe_btn,       # create probe object
+                          self.process_btn,     # process raw recording
+                          self.analyze_btn]     # launch analysis window
+        for btn in self.home_btns:
+            btn.setStyleSheet(pyfx.dict2ss(QSS.INSET_BTN))
+            self.centralLayout.addWidget(btn)
         self.setCentralWidget(self.centralWidget)
     
     def connect_signals(self):
-        """ Connect widgets to functions """
+        """ Connect GUI buttons """
         self.base_folder_btn.clicked.connect(self.base_folder_popup)
         self.view_params_btn.clicked.connect(self.view_param_popup)
         self.probe_btn.clicked.connect(self.probe_popup)
@@ -128,79 +84,42 @@ class toothy(QtWidgets.QMainWindow):
     
     def base_folder_popup(self):
         """ View or change base data directories """
-        self.basedirs_popup = sp.BaseFolderPopup()
-        self.basedirs_popup.setModal(True)
-        self.basedirs_popup.show()
+        self.basedirs_popup = BaseFolderPopup()
         self.basedirs_popup.path_updated_signal.connect(lambda i: self.resize_signal.emit(self.basedirs_popup))
+        self.basedirs_popup.exec()
     
     def view_param_popup(self):
         """ View/edit default parameters """
-        self.parameters_popup = gi.ParamSettings()
-        self.parameters_popup.setModal(True)
-        res = self.parameters_popup.exec()
-        if res and (self.parameters_popup.SAVE_LOCATION != ephys.base_dirs()[3]):
+        self.parameters_popup = ParameterPopup(ddict=ephys.read_params())
+        if self.parameters_popup.exec():
             save_path = str(self.parameters_popup.SAVE_LOCATION)
-            res2 = QtWidgets.QMessageBox.question(None, '', (f'Use {os.path.basename(save_path)} '
-                                                             'as default parameter file?'))
-            if res2:
+            if save_path == ephys.base_dirs()[3]: return
+            msg = f'Use "{os.path.basename(save_path)}" as default parameter file?'
+            res = gi.MsgboxQuestion(msg).exec()
+            if res == QtWidgets.QMessageBox.Yes:
                 ephys.write_base_dirs(ephys.base_dirs()[0:3] + [save_path])
         
     def probe_popup(self, *args, init_probe=None):
         """ Build probe objects """
-        self.probeobj_popup = sp.ProbeObjectPopup(probe=init_probe)
+        self.probeobj_popup = ProbeObjectPopup(probe=init_probe)
         self.probeobj_popup.setModal(True)
         self.probeobj_popup.show()
         self.resize_signal.emit(self.probeobj_popup)
         
-    def raw_data_popup(self, *args, mode=2, init_raw_ddir=''):
-        """ Select raw data for processing """
-        self.rawdata_popup = sp.RawDirectorySelectionPopup(raw_ddir=init_raw_ddir)
-        self.rawdata_popup.setModal(True)
-        self.rawdata_popup.show()
+    def raw_data_popup(self, *args):
+        """ Raw data processing pipeline """
+        self.rawdata_popup = RawRecordingSelectionPopup(init_ppath=self.init_raw_ddir)
+        self.rawdata_popup.exec()
+        # set analysis hub to the most recently processed recording folder
+        if self.rawdata_popup.last_saved_ddir is not None:
+            self.init_processed_ddir = str(self.rawdata_popup.last_saved_ddir)
         
-    def processed_data_popup(self, *args, init_ddir=''):
+    def processed_data_popup(self, *args):
         """ Show processed data options """
         # create popup window for processed data
-        self.analysis_popup = sp.ProcessedDirectorySelectionPopup(init_ddir=init_ddir)
-        self.analysis_popup.setModal(True)
-        self.analysis_popup.ab.option1_btn.clicked.connect(self.ch_selection_popup)
-        self.analysis_popup.ab.option2_btn.clicked.connect(self.classify_ds_popup)
-        self.analysis_popup.show()
-    
-    def ch_selection_popup(self):
-        # beta
-        ddir = self.analysis_popup.ddir
-        probe_list = self.analysis_popup.probe_group.probes
-        iprb = self.analysis_popup.probe_idx
-        ishank = self.analysis_popup.shank_idx
-        self.ch_selection_dlg = ChannelSelectionWindow(ddir, probe_list=probe_list, 
-                                                       iprb=iprb, ishank=ishank)
-        self.ch_selection_dlg.setModal(True)
-        res = self.ch_selection_dlg.exec()
-        if res:
-            # update current probe and shank from GUI
-            iprb = int(self.ch_selection_dlg.iprb)
-            ishank = int(self.ch_selection_dlg.ishank)
-            self.analysis_popup.probe_dropdown.setCurrentIndex(iprb)
-            self.analysis_popup.shank_dropdown.setCurrentIndex(ishank)
-        # always check for updated files, enable/disable analysis options
-        self.analysis_popup.ab.ddir_toggled(ddir, probe_idx=iprb, shank_idx=ishank)
-    
-    def classify_ds_popup(self):
-        """ Launch DS analysis window """
-        ddir = self.analysis_popup.ddir
-        iprb = self.analysis_popup.probe_idx
-        ishank = self.analysis_popup.shank_idx
-        # load DS dataframe
-        DS_DF = ephys.load_ds_dataset(ddir, iprb, ishank=ishank)
-        if DS_DF.empty:
-            QtWidgets.QMessageBox.critical(self.analysis_popup, '', 'No dentate spikes detected on the hilus channel.')
-            return
-        self.classify_ds_dlg = DS_CSDWindow(ddir, iprb=iprb, ishank=ishank)
-        self.classify_ds_dlg.setModal(True)
-        _ = self.classify_ds_dlg.exec()
-        # check for updated files, enable/disable analysis options
-        self.analysis_popup.ab.ddir_toggled(ddir, probe_idx=iprb, shank_idx=ishank)
+        self.analysis_popup = ProcessedRecordingSelectionPopup(init_ppath=self.init_processed_ddir, parent=self)
+        self.analysis_popup.exec()
+        self.init_processed_ddir = str(self.analysis_popup.ddir)
         
     def center_window(self):
         """ Move GUI to center of screen """
@@ -208,18 +127,13 @@ class toothy(QtWidgets.QMainWindow):
         screen_rect = QtWidgets.QDesktopWidget().screenGeometry()
         qrect.moveCenter(screen_rect.center())  # move center of qr to center of screen
         self.move(qrect.topLeft())
-        
-        
-def main():
-    app = QtWidgets.QApplication(sys.argv)
-    app.setStyle('Fusion')
-    app.setQuitOnLastWindowClosed(True)
+    
+
+if __name__ == '__main__':
+    app = pyfx.qapp()
     
     ToothyWindow = toothy()
     ToothyWindow.raise_()
     
     sys.exit(app.exec())
     
-
-if __name__ == '__main__':
-    main()
