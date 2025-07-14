@@ -12,10 +12,13 @@ from pathlib import Path
 import re
 import json
 import neo
+import time
 import pickle
 import scipy.io as so
+import scipy.signal
 import numpy as np
 import pandas as pd
+import math
 from PyQt5 import QtWidgets, QtCore
 from open_ephys.analysis import Session
 import spikeinterface
@@ -441,14 +444,26 @@ def load_chunk(data_format, ii, jj, ichan=None, **kwargs):
         snip = load_recording_chunk(ii=ii, jj=jj, ichan=ichan, **kwargs)
     return snip
 
-def downsample_chunk(snip, ds_factor):
-    """ Downsample raw data chunk to bins of X samples """
+def get_interp_factors(FS, lfp_fs):
+    """ Get upsampling and downsampling factors for interpolation """
+    lcm = math.lcm(int(FS), int(lfp_fs)) # least common multiple
+    upf = int(lcm / FS)     # expand to LCM
+    dnf = int(lcm / lfp_fs) # reduce to target size
+    return lcm, upf, dnf
+    
+def downsample_chunk(snip, upf, dnf):
+    """ Downsample data chunk by interpolation and binning """
     NCH, NTS = snip.shape
-    # downsample by calculating mean of X consecutive samples
-    j = int(np.floor(NTS / ds_factor) * ds_factor)
-    shape = (-1, ds_factor, NCH)
-    arr = np.reshape(snip[:,0:j].T, shape).mean(axis=1, dtype='float32').T
-    return arr
+    up_snip = np.repeat(snip, upf, axis=1)
+    j = int(np.floor(up_snip.shape[1] / dnf) * dnf)
+    shape = (-1, dnf, NCH)
+    snip_dn = np.reshape(up_snip[:, 0:j].T, shape).mean(axis=1, dtype='float32').T
+    return snip_dn
+
+def resample_chunk(snip, nbins):
+    """ Scipy signal processing module """
+    snip_dn = scipy.signal.resample(snip, nbins, axis=1)
+    return snip_dn
 
 def load_chunks(recording, load_win=600, lfp_fs=1000, ichannels=[], 
                 update_fx=lambda txt: print(txt), **kwargs):
@@ -499,7 +514,7 @@ def load_chunks(recording, load_win=600, lfp_fs=1000, ichannels=[],
         KW['fid'].close()
     return datasets
 
-def bp_filter_lfps(lfp, lfp_fs, **kwargs):
+def bp_filter_lfps(lfp, lfp_fs, bp_dict=None, load_win=None, **kwargs):
     """ Bandpass filter LFP signals within fixed frequency bands """
     # set filter cutoffs
     theta      = kwargs.get('theta',      [6,10])
@@ -508,15 +523,45 @@ def bp_filter_lfps(lfp, lfp_fs, **kwargs):
     swr_freq   = kwargs.get('swr_freq',   [120,180])
     ds_freq    = kwargs.get('ds_freq',    [5,100])
     
-    # collect filtered LFPs in data dictionary
-    bp_dict = {'raw' : lfp}; KW={'lfp_fs':lfp_fs, 'axis':1}
-    bp_dict['theta']      = pyfx.butter_bandpass_filter(lfp, *theta,      **KW)
-    bp_dict['slow_gamma'] = pyfx.butter_bandpass_filter(lfp, *slow_gamma, **KW)
-    bp_dict['fast_gamma'] = pyfx.butter_bandpass_filter(lfp, *fast_gamma, **KW)
-    bp_dict['swr']        = pyfx.butter_bandpass_filter(lfp, *swr_freq,   **KW)
-    bp_dict['ds']         = pyfx.butter_bandpass_filter(lfp, *ds_freq,    **KW)
+    if bp_dict is None:
+        bp_dict = {'raw' : lfp}
+        for k in ['theta', 'slow_gamma', 'fast_gamma', 'swr', 'ds']:
+            bp_dict[k] = np.zeros(lfp.shape, dtype='float32')
+            
+    KW = {'lfp_fs':lfp_fs, 'axis':1}
     
+    if load_win is None:
+        start_time = time.time()
+        # collect filtered LFPs in data dictionary
+        bp_dict['theta'][:]      = pyfx.butter_bandpass_filter(lfp, *theta,      **KW)
+        bp_dict['slow_gamma'][:] = pyfx.butter_bandpass_filter(lfp, *slow_gamma, **KW)
+        bp_dict['fast_gamma'][:] = pyfx.butter_bandpass_filter(lfp, *fast_gamma, **KW)
+        bp_dict['swr'][:]        = pyfx.butter_bandpass_filter(lfp, *swr_freq,   **KW)
+        bp_dict['ds'][:]         = pyfx.butter_bandpass_filter(lfp, *ds_freq,    **KW)
+        end_time = time.time()
+        print(f'outsourced whole filtering --> {end_time-start_time:.2f} s')
+    else:
+        start_time = time.time()
+        nchunks = int(np.ceil(lfp.shape[1] / lfp_fs / load_win))
+        arr_list = np.array_split(lfp, nchunks, axis=1)
+        p = 0
+        for yarr in arr_list:
+            q = p + yarr.shape[1]
+            bp_dict['theta'][:,p:q] = pyfx.butter_bandpass_filter(yarr, *theta, **KW)
+            bp_dict['slow_gamma'][:,p:q] = pyfx.butter_bandpass_filter(yarr, *slow_gamma, **KW)
+            bp_dict['fast_gamma'][:,p:q] = pyfx.butter_bandpass_filter(yarr, *fast_gamma, **KW)
+            bp_dict['swr'][:,p:q] = pyfx.butter_bandpass_filter(yarr, *swr_freq, **KW)
+            bp_dict['ds'][:,p:q] = pyfx.butter_bandpass_filter(yarr, *ds_freq, **KW)
+            p = int(q)
+        end_time = time.time()
+        print(f'outsourced chunk filtering --> {end_time-start_time:.2f} s')
     return bp_dict
+
+
+def bp_filter_lfp(lfp, lfp_fs, fband, load_win=None):
+    filt_lfp = pyfx.butter_bandpass_filter(lfp, *fband, lfp_fs=lfp_fs, axis=1)
+    return filt_lfp
+
 
 def detect_channel(event, i, data, lfp_time, DF=None, THRES=None, pprint=False, **PARAMS):
     """ Run ripple or DS detection for the given $data signal """
