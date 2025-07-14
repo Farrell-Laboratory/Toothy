@@ -76,9 +76,9 @@ class IFigLFP(QtWidgets.QWidget):
         # create subplots and interactive widgets
         self.plot_height = pyfx.ScreenRect(perc_height=0.75).height()
         self.create_subplots(twin=twin)
-        self.fig.set_tight_layout(True)
-        self.fig_w.set_tight_layout(True)
-        self.fig_freq.set_tight_layout(True)
+        #self.fig.set_tight_layout(True)
+        #self.fig_w.set_tight_layout(True)
+        #self.fig_freq.set_tight_layout(True)
         # main canvas with toolbar and central LFP plot
         self.canvas = FigureCanvas(self.fig)  # main plot canvas
         self.canvas.setFocusPolicy(QtCore.Qt.ClickFocus)
@@ -111,7 +111,7 @@ class IFigLFP(QtWidgets.QWidget):
         """ Set up subplot axes for data plots and slider widgets """
         
         ### SLIDER AXES
-        self.fig_w = matplotlib.figure.Figure()
+        self.fig_w = matplotlib.figure.Figure(constrained_layout=True)
         gridspec = matplotlib.gridspec.GridSpec(2, 3, hspace=0, figure=self.fig_w)
         self.sax0 = self.fig_w.add_subplot(gridspec[0,0])
         self.sax1 = self.fig_w.add_subplot(gridspec[0,1])
@@ -141,7 +141,7 @@ class IFigLFP(QtWidgets.QWidget):
         self.iw.yfig.on_changed(lambda val: self.plot_row.setFixedHeight(int(self.plot_height + val)))
         
         ### FREQ BAND AXES
-        self.fig_freq = matplotlib.figure.Figure()
+        self.fig_freq = matplotlib.figure.Figure(constrained_layout=True)
         #gridspec2 = matplotlib.gridspec.GridSpec(1, 3, figure=self.fig_freq)
         fax0 = self.fig_freq.add_subplot(131)
         fax0.autoscale(enable=True, axis='x', tight=True)
@@ -152,7 +152,7 @@ class IFigLFP(QtWidgets.QWidget):
         self.faxs = [fax0, fax1, fax2]
         
         ### MAIN AXES
-        self.fig = matplotlib.figure.Figure()
+        self.fig = matplotlib.figure.Figure(constrained_layout=True)
         self.ax = self.fig.add_subplot()
         self.ax.sharey(fax0)
     
@@ -1350,16 +1350,10 @@ class EventViewWidget(QtWidgets.QFrame):
         
         self.vlay = QtWidgets.QVBoxLayout()
         self.vlay.setSpacing(10)
-        # stylesheets
-        gbox_ss = pyfx.dict2ss(QSS.EVENT_SETTINGS_GBOX)
-        mode_btn_cdict = dict(QSS.INSET_BTN)
-        mode_btn_cdict['QPushButton'].update({'background-color' : 'whitesmoke',
-                                              'border-width' : '2px'})
-        mode_btn_ss = pyfx.dict2ss(mode_btn_cdict)
         
         ###   VIEW PLOT ITEMS
         self.view_gbox = QtWidgets.QGroupBox('VIEW')
-        self.view_gbox.setStyleSheet(gbox_ss)
+        self.view_gbox.setStyleSheet(pyfx.dict2ss(QSS.EVENT_SETTINGS_GBOX))
         view_lay = pyfx.InterWidgets(self.view_gbox, 'v')[2]
         view_lay.setSpacing(10)
         ### show/hide thresholds
@@ -1408,7 +1402,7 @@ class EventViewWidget(QtWidgets.QFrame):
         
         ###   DATA PLOT ITEMS (SINGLE VS AVERAGED EVENTS)
         self.data_gbox = QtWidgets.QGroupBox('MODE')
-        self.data_gbox.setStyleSheet(gbox_ss)
+        self.data_gbox.setStyleSheet(pyfx.dict2ss(QSS.EVENT_SETTINGS_GBOX))
         data_lay = pyfx.InterWidgets(self.data_gbox, 'v')[2]
         data_lay.setSpacing(10)
         ### buttons for single vs averaged plot mode
@@ -1417,11 +1411,11 @@ class EventViewWidget(QtWidgets.QFrame):
         self.plot_mode_bgrp = QtWidgets.QButtonGroup(self.data_gbox)
         self.single_btn = QtWidgets.QPushButton('Single Events')
         self.single_btn.setCheckable(True)
-        self.single_btn.setStyleSheet(mode_btn_ss)
+        self.single_btn.setStyleSheet(pyfx.dict2ss(QSS.BOLD_INSET_BTN))
         self.avg_btn = QtWidgets.QPushButton('Averages')
         self.avg_btn.setCheckable(True)
         self.avg_btn.setChecked(True)
-        self.avg_btn.setStyleSheet(mode_btn_ss)
+        self.avg_btn.setStyleSheet(pyfx.dict2ss(QSS.BOLD_INSET_BTN))
         self.plot_mode_bgrp.addButton(self.avg_btn, 0)
         self.plot_mode_bgrp.addButton(self.single_btn, 1)
         pm_vbox.addWidget(self.single_btn)
@@ -1440,7 +1434,7 @@ class EventViewWidget(QtWidgets.QFrame):
         
         ###   SORT EVENTS
         self.sort_gbox = QtWidgets.QGroupBox('SORT')
-        self.sort_gbox.setStyleSheet(gbox_ss)
+        self.sort_gbox.setStyleSheet(pyfx.dict2ss(QSS.EVENT_SETTINGS_GBOX))
         sort_lay = pyfx.InterWidgets(self.sort_gbox, 'v')[2]
         sort_lay.setSpacing(0)
         self.sort_bgrp = QtWidgets.QButtonGroup(self.sort_gbox)
@@ -1534,7 +1528,8 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         
         self.plot_freq_pwr = gi.ShowHideBtn(init_show=False)
         self.plot_freq_pwr.setAutoDefault(False)
-        self.plot_freq_pwr.setStyleSheet(pyfx.dict2ss(QSS.FREQ_TOGGLE_BTN))
+        self.plot_freq_pwr.setStyleSheet(pyfx.dict2ss(QSS.EXPAND_LEFT_BTN))
+        #self.plot_freq_pwr.setStyleSheet(pyfx.dict2ss(QSS.FREQ_TOGGLE_BTN))
         self.plot_freq_pwr.setLayoutDirection(QtCore.Qt.LeftToRight)
         
         ###   EVENT WIDGETS   ###
@@ -1564,7 +1559,7 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         self.theta_input = self.theta_gbox.chan_input
         self.theta_reset = self.theta_gbox.chan_reset
         self.theta_event_btn = self.theta_gbox.chan_event_btn
-        self.theta_event_btn.setEnabled(False)
+        self.theta_event_btn.hide()
         
         # set channels
         self.ch_inputs = [self.theta_input, self.swr_input, self.hil_input]

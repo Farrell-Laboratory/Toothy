@@ -69,7 +69,8 @@ class toothy(QtWidgets.QMainWindow):
                           self.process_btn,     # process raw recording
                           self.analyze_btn]     # launch analysis window
         for btn in self.home_btns:
-            btn.setStyleSheet(pyfx.dict2ss(QSS.INSET_BTN))
+            
+            btn.setStyleSheet(pyfx.dict2ss(QSS.BOLD_INSET_BTN))
             self.centralLayout.addWidget(btn)
         self.setCentralWidget(self.centralWidget)
     
@@ -85,7 +86,7 @@ class toothy(QtWidgets.QMainWindow):
     def base_folder_popup(self):
         """ View or change base data directories """
         self.basedirs_popup = BaseFolderPopup()
-        self.basedirs_popup.path_updated_signal.connect(lambda i: self.resize_signal.emit(self.basedirs_popup))
+        self.basedirs_popup.widget.path_updated_signal.connect(lambda i: self.resize_signal.emit(self.basedirs_popup))
         self.basedirs_popup.exec()
     
     def view_param_popup(self):

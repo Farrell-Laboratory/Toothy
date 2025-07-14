@@ -128,9 +128,7 @@ class DSPlotBtn(QtWidgets.QPushButton):
             bgrp.addButton(self)
         self.bgrp = bgrp
         # set stylesheet
-        mode_btn_cdict = dict(QSS.INSET_BTN)
-        mode_btn_cdict['QPushButton'].update({'background-color' : 'whitesmoke'})        
-        self.setStyleSheet(pyfx.dict2ss(mode_btn_cdict))
+        self.setStyleSheet(pyfx.dict2ss(QSS.BOLD_INSET_BTN))
     
     def mouseReleaseEvent(self, event):
         """ Button click finished """

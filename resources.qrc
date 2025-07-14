@@ -13,6 +13,7 @@
     <file>icons/swap.png</file>
     <file>icons/swap_thick.png</file>
     <file>icons/swap_arrows.png</file>
+    <file>icons/swap_arrows_vert.png</file>
     <file>icons/user_folder.png</file>
     <file>icons/numbered_list.png</file>
     <file>icons/shapes.png</file>
@@ -40,5 +41,8 @@
     <file>icons/green_circle.png</file>
     <file>icons/yellow_circle.png</file>
     <file>icons/red_circle.png</file>
+    <file>icons/warning_yellow.png</file>
+    <file>icons/warning_red.png</file>
+    <file>icons/turn_arrows.png</file>
   </qresource>
 </RCC>

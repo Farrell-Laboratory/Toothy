@@ -421,6 +421,26 @@ def unique_fname(ddir, base_name):
         i += 1
     return fname
 
+def sizepol(widget, hpol=None, vpol=None):
+    """  Shortcut for setting widget size policies
+    0=Fixed, 1=Minimum, 3=MinimumExpanding, 4=Maximum, 5=Preferred, 7=Expanding, 13=Ignored
+    """
+    policies = {0:'Fixed', 1:'Minimum', 3:'MinimumExpanding', 4:'Maximum', 
+                5:'Preferred', 7:'Expanding', 13:'Ignored'}
+    
+    def get_qpol(pol):
+        try: return eval(f'QtWidgets.QSizePolicy.{pol}')
+        except:
+            try: return eval(f'QtWidgets.QSizePolicy.{policies[pol]}')
+            except: return None
+    
+    policy = widget.sizePolicy()
+    hpol = get_qpol(hpol) # horizontal size policy
+    if hpol is not None: policy.setHorizontalPolicy(hpol)
+    vpol = get_qpol(vpol) # vertical size policy
+    if vpol is not None: policy.setVerticalPolicy(vpol)
+    widget.setSizePolicy(policy)
+    
 def get_widget_container(orientation, *widgets, widget='none', **kwargs):
     """ Organize $widgets in a QBoxLayout, optionally embedded in a parent widget """
     
@@ -472,6 +492,12 @@ def get_widget_container(orientation, *widgets, widget='none', **kwargs):
         return dlg
     else:
         return layout # return layout object
+    
+def center_window(widget):
+    """ Move widget to center of screen """
+    qrect = widget.frameGeometry()  # proxy rectangle for window with frame
+    qrect.moveCenter(ScreenRect().center())  # move center of qr to center of screen
+    widget.move(qrect.topLeft())
         
         
 def InterWidgets(parent, orientation='v'):

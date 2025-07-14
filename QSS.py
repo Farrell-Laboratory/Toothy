@@ -5,60 +5,93 @@ StyleSheets
 
 @author: amandaschott
 """
+from copy import deepcopy
 
 ##############################################################################
-################                 HOME BUTTONS                 ################
+################                    BUTTONS                   ################
 ##############################################################################
 
-INSET_BTN = {'QPushButton' : {
-                            'background-color' : 'gainsboro',
-                            'border-width'  : '3px',
-                            'border-style'  : 'outset',
-                            'border-color'  : 'gray',
-                            'border-radius' : '2px',
-                            'color' : 'black',
-                            'padding' : '4px',
-                            'font-weight' : 'bold',
-                            }, 
-    
-            'QPushButton:pressed' : {
-                                    'background-color' : 'dimgray',
-                                    'border-style' : 'inset',
-                                    'border-color'  : 'gray',
-                                    'color' : 'white',
-                                    },
+TOGGLE_BTN = {'QPushButton' : {
+                              'background-color' : 'whitesmoke',
+                              'border-width'  : '1px',
+                              'border-style'  : 'solid',
+                              'border-color'  : 'gray',
+                              'border-radius' : '3px',
+                              'color' : 'black',
+                              'font-weight' : 'normal',
+                              'padding' : '4px',
+                              }, 
+              
+              'QPushButton:pressed' : {
+                                      'background-color' : 'dimgray',
+                                      'border-color' : 'gray',
+                                      'color' : 'white',
+                                      },
             
-            'QPushButton:checked' : {
-                                    'background-color' : 'darkgray',
-                                    'border-style' : 'inset',
-                                    'border-color'  : 'gray',
-                                    'color' : 'black',
-                                    },
+              'QPushButton:checked' : {
+                                      'background-color' : 'darkgray',
+                                      'border-color' : 'gray',
+                                      'color' : 'black',
+                                      },
             
-            'QPushButton:disabled' : {
-                                     'background-color' : 'gainsboro',
-                                     'border-style' : 'outset',
-                                     'border-color'  : 'darkgray',
-                                     'color' : 'gray',
-                                     },
+              'QPushButton:disabled' : {
+                                       'background-color' : 'gainsboro',
+                                       'border-color'  : 'darkgray',
+                                       'color' : 'gray',
+                                       },
                
-            'QPushButton:disabled:checked' : {
-                                             'background-color' : 'darkgray',
-                                             'border-style' : 'inset',
-                                             'border-color'  : 'darkgray',
-                                             'color' : 'dimgray',
-                                             }
-            }
+              'QPushButton:disabled:checked' : {
+                                               'background-color' : 'darkgray',
+                                               'border-color'  : 'darkgray',
+                                               'color' : 'dimgray',
+                                               }
+              }
 
+###   "sunken" toggle buttons (e.g. on Toothy's home screen)
 
-##############################################################################
-################               ANALYSIS BUTTONS               ################
-##############################################################################
+INSET_BTN = deepcopy(TOGGLE_BTN)
+INSET_BTN['QPushButton'].update({
+                                'border-width'  : '2px',
+                                'border-style'  : 'outset',
+                                })
+INSET_BTN['QPushButton:pressed']['border-style'] = 'inset'
+INSET_BTN['QPushButton:checked']['border-style'] = 'inset'
+INSET_BTN['QPushButton:disabled']['border-style'] = 'outset'
+INSET_BTN['QPushButton:disabled:checked']['border-style'] = 'inset'
 
+BOLD_INSET_BTN = deepcopy(INSET_BTN)
+BOLD_INSET_BTN['QPushButton']['border-width'] = '3px'
+BOLD_INSET_BTN['QPushButton']['font-weight'] = 'bold'
+
+###   expand/collapse buttons for settings panes, plots, etc
+
+EXPAND_LEFT_BTN = deepcopy(INSET_BTN)  # frequency plots
+EXPAND_LEFT_BTN['QPushButton'].update({
+                                      'image' : 'url(:/icons/double_chevron_left.png)',
+                                      'image-position' : 'left',
+                                      })
+EXPAND_LEFT_BTN['QPushButton:checked']['image'] = 'url(:/icons/double_chevron_right.png)'
+
+EXPAND_DOWN_BTN = deepcopy(INSET_BTN) # settings pane
+EXPAND_DOWN_BTN['QPushButton'].update({
+                                      'image' : 'url(:/icons/double_chevron_down.png)',
+                                      'image-position' : 'right',
+                                      })
+EXPAND_DOWN_BTN['QPushButton:checked']['image'] = 'url(:/icons/double_chevron_up.png)'
+
+EXPAND_PARAMS_BTN = deepcopy(EXPAND_DOWN_BTN) # parameter inputs
+EXPAND_PARAMS_BTN['QPushButton']['icon'] = 'url(:/icons/settings.png)'
+
+EXPAND_AUX_BTN = deepcopy(EXPAND_DOWN_BTN)
+EXPAND_AUX_BTN['QPushButton']['icon'] = 'url(:/icons/view.png)'
+
+###   circular colored buttons in the main processed data hub
 
 ANALYSIS_BTN = {'QPushButton' : {
                                 'background-color' : 'white',
-                                'border' : '4px outset rgb(128,128,128)',
+                                'border-width' : '4px',
+                                'border-style' : 'outset',
+                                'border-color' : 'rgb(128,128,128)',
                                 'border-radius' : '11px',
                                 'min-width'  : '15px',
                                 'max-width'  : '15px',
@@ -76,10 +109,59 @@ ANALYSIS_BTN = {'QPushButton' : {
                 }
 
 
+
+TRANGE_TOGGLE_BTN = deepcopy(TOGGLE_BTN)
+TRANGE_TOGGLE_BTN['QPushButton'].update({
+                                        'border' : 'none',
+                                        'outline' : 'none',
+                                        #'image' : 'url(:/icons/warning_yellow.png)',
+                                        'image' : 'url(:/icons/swap_arrows_vert.png)',
+                                        #'background-image':'url(:/icons/swap_arrows_vert.png)',
+                                         'padding':'1px',
+                                         })
+
 ##############################################################################
-################                 LIST WIDGETS                 ################
+################                     ICONS                    ################
 ##############################################################################
 
+ICON_BTN = {'QPushButton' : {
+                            'border' : 'none',
+                            'outline' : 'none',
+                            'padding' : '0px',
+                              },
+            
+            'QPushButton#params_warning' : {
+                                           'image' : 'url(:/icons/warning_yellow.png)',
+                                           }
+            }
+
+
+##############################################################################
+################                 INPUT WIDGETS                ################
+##############################################################################
+
+
+###   numeric inputs and dropdown menus
+
+PARAM_INPUTS = {'QAbstractSpinBox' : {
+                                     'background-color':'white',
+                                     'color':'black',
+                                     },
+                'QAbstractSpinBox:disabled' : {'color':'gainsboro',},
+       
+                'QComboBox'      : {'color':'black',},
+                'QComboBox:open' : {'background-color':'white',
+                                    'color' : 'black',},
+                }
+
+###   missing/invalid input parameters
+
+PARAM_INPUTS_OFF = deepcopy(PARAM_INPUTS)
+PARAM_INPUTS_OFF['QAbstractSpinBox'].update({'background-color' : 'red', 
+                                             'color' : 'transparent'})
+PARAM_INPUTS_OFF['QAbstractSpinBox:disabled']['color'] = 'transparent'
+
+###   list interfaces
 
 QLIST = {'QListWidget' : {
                          'background-color' : 'rgba(255,255,255,50)',
@@ -111,6 +193,8 @@ QLIST = {'QListWidget' : {
 ################             CHANNEL SELECTION GUI            ################
 ##############################################################################
 
+
+###   centralized tools for event detection/curation
 
 EVENT_GBOX = {'QGroupBox' : {
                            'background-color' : 'rgba(220,220,220,100)',  # gainsboro
@@ -158,24 +242,6 @@ EVENT_SHOW_BTN = {'QPushButton' : {
                                           'image' : 'url(:/icons/hide_outline.png)',
                                           }
                   }
-
-###   freq. band plot toggle button
-
-FREQ_TOGGLE_BTN = {'QPushButton' : {
-                                   'background-color' : 'whitesmoke',
-                                   'border' : '2px outset gray',
-                                   'color' : 'black',
-                                   'image' : 'url(:/icons/double_chevron_left.png)',
-                                   'image-position' : 'left',
-                                   'padding' : '10px 5px',
-                                   },
-                                  
-                   'QPushButton:checked' : {
-                                           'background-color' : 'gainsboro',
-                                           'border' : '2px inset gray',
-                                           'image' : 'url(:/icons/double_chevron_right.png)',
-                                           }
-                   }
 
 
 ##############################################################################
