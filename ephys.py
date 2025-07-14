@@ -979,12 +979,14 @@ def get_ds_peaks(LFP, lfp_time, lfp_fs, pprint=True, **kwargs):
     if ds_min_dist > 0:
         distance = int(round(lfp_fs * ds_min_dist))
     min_prominence = kwargs.get('ds_prom_thr', 0)
-    thresholds = dict(peak_height=height,  # min. DS peak amplitude
-                      isi=ds_min_dist)     # min. distance (s) between DS events
+    min_amp = kwargs.get('ds_abs_thr', 0)
+    thresholds = dict(peak_height=height,  # min. DS peak height
+                      isi=ds_min_dist,     # min. distance (s) between DS events
+                      min_amp=min_amp)     # min. DS amplitude in mV
     thresholds = pd.Series(thresholds)
-    
+    thres_mv = max(height, min_amp)
     # detect qualifying peaks
-    ipks,props = scipy.signal.find_peaks(LFP, height=height, distance=distance, 
+    ipks,props = scipy.signal.find_peaks(LFP, height=thres_mv, distance=distance, 
                                          prominence=min_prominence)
     ds_prom = props['prominences']
     
