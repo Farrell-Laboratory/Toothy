@@ -408,7 +408,11 @@ class EventGroupbox(QtWidgets.QGroupBox):
         # row 2: launch event-specific popup window
         self.chan_event_btn = QtWidgets.QPushButton(f'View {evs}')
         self.chan_event_btn.setAutoDefault(False)
-        row2 = pyfx.get_widget_container('h', self.chan_event_btn)
+        self.redetect_btn = QtWidgets.QPushButton('Detect')
+        self.redetect_btn.setAutoDefault(False)
+        row2 = pyfx.get_widget_container('h', self.chan_event_btn, self.redetect_btn,
+                                         stretch_factors=[5,2])
+        self.redetect_btn.hide() # in progress
         # row 3: toggle event visibility and edit datasets
         self.chan_show = QtWidgets.QPushButton()
         self.chan_show.setCheckable(True)
@@ -1277,72 +1281,76 @@ class SpinnerWindow(QtWidgets.QWidget):
 ##############################################################################
 
 
-class BaseFolderPopup(QtWidgets.QDialog):
+class BaseFolderWidget(QtWidgets.QWidget):
     """ Base folders GUI for adjusting default data locations and files """
     
     path_updated_signal = QtCore.pyqtSignal(int)
+    saved_signal = QtCore.pyqtSignal()
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle('Base Folders')
-        self.BASE_FOLDERS = [str(x) for x in ephys.base_dirs()]
-        
+        self.BASE_FOLDERS, self.flabels = self.init_folders()
         self.gen_layout()
         self.connect_signals()
+    
+    def init_folders(self):
+        BASE_FOLDERS = [str(x) for x in ephys.base_dirs()]
+        flabels = ['Raw Data Folder', 'Probe Configuration Folder',
+                        'Default Probe File', 'Parameter File']
+        return BASE_FOLDERS, flabels
         
+    def makebtn(self, icon):
+        """ Return icon button """
+        btn = QtWidgets.QPushButton()
+        btn.setFocusPolicy(QtCore.Qt.NoFocus)
+        btn.setFixedSize(30,30)
+        btn.setIcon(icon)
+        btn.setIconSize(QtCore.QSize(20,20))
+        return btn
+    
+    def makerow(self, i, icon2=None):
+        """ Return widgets for a given row """
+        ppath_label_ss = ('QLabel {background-color:white;'
+                                  'border:1px solid gray;'
+                                  'border-radius:4px;'
+                                  'padding:5px;}')
+        # create filepath label
+        ppath_label = QtWidgets.QLabel(f'<code>{self.BASE_FOLDERS[i]}</code>')
+        ppath_label.setStyleSheet(ppath_label_ss)
+        # create title and button
+        qlabel = QtWidgets.QLabel(f'<b>{self.flabels[i]}</b>')
+        ftype = self.flabels[i].split(' ')[-1].lower() # "folder" or "file"
+        url = f':/icons/{dict(folder="folder", file="load")[ftype]}.png'
+        res = (ppath_label,btn) = [ppath_label, self.makebtn(QtGui.QIcon(url))]
+        if icon2 is not None: # add a second button
+            res.append(self.makebtn(QtGui.QIcon(f':/icons/{icon2}.png')))
+        row1 = pyfx.get_widget_container('h', *res, spacing=5)
+        
+        #if i==2: res.append(self.makebtn(QtGui.QIcon(':/icons/trash.png')))
+        #if i==3: res.append(self.makebtn(QtGui.QIcon(':/icons/load_txt.png')))
+        w = pyfx.get_widget_container('v', qlabel, row1, spacing=2,
+                                      widget='widget', cm=None)
+        return res, w
+    
     def gen_layout(self):
         """ Set up layout """
-        qlabel_ss = ('QLabel {background-color:white;'
-                             'border:1px solid gray;'
-                             'border-radius:4px;'
-                             'padding:5px;}')
-        fmt = '<code>{}</code>'
-        labels = ['Raw Data Folder', 'Probe Configuration Folder',
-                  'Default Probe File', 'Parameter File']
-        
-        def makebtn(icon):
-            """ Return icon button """
-            btn = QtWidgets.QPushButton()
-            btn.setFocusPolicy(QtCore.Qt.NoFocus)
-            btn.setFixedSize(30,30)
-            btn.setIcon(icon)
-            btn.setIconSize(QtCore.QSize(20,20))
-            return btn
-        
-        def makerow(i):
-            """ Return widgets for a given row """
-            qlabel = QtWidgets.QLabel(fmt.format(self.BASE_FOLDERS[i]))
-            qlabel.setStyleSheet(qlabel_ss)
-            btn = makebtn(QtGui.QIcon(f':/icons/{["folder","load"][int(i/2)]}.png'))
-            res = [qlabel, btn]
-            if i==2: res.append(makebtn(QtGui.QIcon(':/icons/trash.png')))
-            if i==3: res.append(makebtn(QtGui.QIcon(':/icons/load_txt.png')))
-            row0 = QtWidgets.QLabel(f'<b>{labels[i]}</b>')
-            row1 = pyfx.get_widget_container('h', *res, spacing=5)
-            w = pyfx.get_widget_container('v', row0, row1, spacing=2,
-                                          widget='widget', cm=None)
-            return res, w
-        
         # create folder labels and selection buttons
-        (self.raw_qlabel, self.raw_btn), self.raw_w = makerow(0)
-        (self.prb_qlabel, self.prb_btn), self.prb_w = makerow(1)
-        (self.prbf_qlabel, self.prbf_btn, self.prbf_clear), self.prbf_w = makerow(2)
-        (self.param_qlabel, self.param_btn, self.param_auto), self.param_w = makerow(3)
+        #(self.raw_ppath_label, self.raw_btn), self.raw_w = self.makerow(0)
+        (self.raw_ppath_label, self.raw_btn), self.raw_w = self.makerow(0)
+        (self.prb_ppath_label, self.prb_btn), self.prb_w = self.makerow(1)
+        (self.prbf_ppath_label, self.prbf_btn, self.prbf_clear), self.prbf_w = self.makerow(2, 'trash')
+        (self.param_ppath_label, self.param_btn, self.param_auto), self.param_w = self.makerow(3, 'load_txt')
         self.param_auto.setToolTip('<big>Auto-generate parameter file from default values.</big>')
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.setSpacing(20)
-        layout.addWidget(self.raw_w)
-        layout.addWidget(self.prb_w)
-        layout.addWidget(self.prbf_w)
-        layout.addWidget(self.param_w)
+        self.ppath_labels = [self.raw_ppath_label, self.prb_ppath_label,
+                             self.prbf_ppath_label, self.param_ppath_label]
+        layout = pyfx.get_widget_container('v', self.raw_w, self.prb_w, self.prbf_w, 
+                                           self.param_w, spacing=20)
+        self.setLayout(layout)
         # action buttons
-        bbox = QtWidgets.QHBoxLayout()
         self.save_btn = QtWidgets.QPushButton('Save')
         #self.save_btn.setStyleSheet(blue_btn_ss)
         self.save_btn.setEnabled(False)
-        bbox.addWidget(self.save_btn)
-        layout.addLayout(bbox)
-        
+    
     def connect_signals(self):
         """ Connect GUI inputs """
         self.raw_btn.clicked.connect(lambda: self.choose_base_ddir(0))
@@ -1379,7 +1387,7 @@ class BaseFolderPopup(QtWidgets.QDialog):
         """ Clear default probe file """
         self.BASE_FOLDERS[2] = ''
         self.path_updated_signal.emit(2)
-            
+    
     def choose_param_file(self):
         """ Select parameter file """
         init_ppath = str(self.BASE_FOLDERS[3])
@@ -1387,7 +1395,7 @@ class BaseFolderPopup(QtWidgets.QDialog):
         if param_dict is not None:
             self.BASE_FOLDERS[3] = str(fpath)
             self.path_updated_signal.emit(3)
-    
+            
     def auto_param_file(self):
         """ Save new parameter file with default values """
         fpath = ephys.select_save_param_file(qparam.get_original_defaults(), 
@@ -1400,26 +1408,40 @@ class BaseFolderPopup(QtWidgets.QDialog):
     def update_base_ddir(self, i):
         """ Update filepath text to the selected location """
         txt = f'<code>{self.BASE_FOLDERS[i]}</code>'
-        ql = [self.raw_qlabel,self.prb_qlabel,self.prbf_qlabel,self.param_qlabel][i]
-        ql.setText(txt)
+        self.ppath_labels[i].setText(txt)
         self.save_btn.setEnabled(True)
     
     def save_base_folders(self):
         """ Save filepaths to "default_folders.txt" """
         ddir_list = list(self.BASE_FOLDERS)
         ephys.write_base_dirs(ddir_list)
-        self.accept()
+        self.saved_signal.emit()
     
+    
+class BaseFolderPopup(QtWidgets.QDialog):
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('Base Folders')
+        self.widget = BaseFolderWidget()
+        self.widget.saved_signal.connect(self.accept)
+        bbox = QtWidgets.QHBoxLayout()
+        bbox.addWidget(self.widget.save_btn)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addWidget(self.widget)
+        layout.addLayout(bbox)
+        
 
 class ParameterPopup(QtWidgets.QDialog):
     """ Settings GUI for editing and saving parameter values """
     
     SAVE_LOCATION = None
     
-    def __init__(self, ddict, hide_params=['el_shape','el_area','el_h'], parent=None):
+    def __init__(self, ddict, mode='all', hide_params=['el_shape','el_area','el_h'], 
+                 parent=None):
         super().__init__(parent)
         # initialize parameter input widget
-        self.main_widget = qparam.ParamObject(ddict)
+        self.main_widget = qparam.ParamObject(ddict, mode=mode)
         for param in hide_params:
             if param in self.main_widget.ROWS.keys():
                 self.main_widget.ROWS[param].hide()
