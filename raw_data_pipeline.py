@@ -19,6 +19,7 @@ import pickle
 import probeinterface as prif
 import pdb
 # custom modules
+import QSS
 import pyfx
 import qparam
 import ephys
@@ -153,6 +154,11 @@ class DataWorker(QtCore.QObject):
         save_ddir   = kwargs.get('save_ddir', self.SAVE_DDIR)
         if not os.path.isdir(save_ddir):
             os.mkdir(save_ddir)
+            
+        ################################
+        #####     PARSE PARAMS     #####
+        ################################
+        
         load_win    = kwargs.get('load_win', 600)
         recording.set_probegroup(probe_group, in_place=True)
         META = dp.get_meta_from_recording(recording)
@@ -161,15 +167,22 @@ class DataWorker(QtCore.QObject):
         
         # parse metadata and analysis parameters
         FS, NSAMPLES, TOTAL_CH = META['fs'], META['nsamples'], META['total_ch']
-        lfp_fs = PARAMS['lfp_fs']; ds_factor = int(FS/lfp_fs) # downsampling factor
+        lfp_fs = PARAMS['lfp_fs']
         tstart, tend = PARAMS['trange']  # extract data between timepoints
         iistart, iiend = dp.get_rec_bounds(NSAMPLES, FS, tstart, tend)
-        NSAMPLES_DN_TRUNC = int((iiend-iistart) / ds_factor)
+        NSAMPLES_TRUNC = int(iiend-iistart)
+        # calculate size of downsampled dataset
+        ds_factor = FS/lfp_fs
+        NSAMPLES_DN_TRUNC = int(NSAMPLES_TRUNC / ds_factor)
+        
         global_dev_idx = probe_group.get_global_device_channel_indices()['device_channel_indices']
         nprobes = len(probe_group.probes)
         
-        # get IO object (fid, cont, or recording)
-        try:
+        ################################
+        #####      I/O OBJECTS     #####
+        ################################
+        
+        try:  # get IO object (fid, cont, or recording)
             KW = {**dp.get_raw_source_kwargs(recording), 'total_ch':TOTAL_CH}
         except Exception as e:
             self.quit_thread(f'Data Source Error: {str(e)}')
@@ -192,10 +205,14 @@ class DataWorker(QtCore.QObject):
             dset = PROBE_LFPS.create_dataset('raw', (len(ichan), NSAMPLES_DN_TRUNC), 
                                               dtype='float32')
             ichannels.append(ichan); datasets.append(dset)
-            
+        
+        ##################################
+        #####     DATA EXTRACTION    #####
+        ##################################
+        
         # extract and downsample LFPs in ~10 min chunks
-        chunkfunc, (iichunk,_) = dp.get_chunkfunc(load_win, FS, NSAMPLES, lfp_fs=lfp_fs,
-                                                  tstart=tstart, tend=tend)
+        chunkfunc, (iichunk,ichunk) = dp.get_chunkfunc(load_win, FS, NSAMPLES, lfp_fs=lfp_fs,
+                                                       tstart=tstart, tend=tend)
         count = 0
         while True:
             (ii,jj),(aa,bb),txt = chunkfunc(count)
@@ -206,9 +223,11 @@ class DataWorker(QtCore.QObject):
                 except Exception as e:
                     self.quit_thread(f'I/O Error: {str(e)}', ff=ff, KW=KW)
                     return
+                
                 try:  # downsample LFP signals
-                    snip_dn = dp.downsample_chunk(snip, ds_factor)
-                    dset[:, aa:bb] = snip_dn
+                    snip_dn = dp.resample_chunk(snip, bb-aa)
+                    p = count*ichunk
+                    dset[:, p:p+(bb-aa)] = snip_dn
                 except Exception as e:
                     self.quit_thread(f'Downsampling Error: {str(e)}', ff=ff, KW=KW)
                     return
@@ -218,27 +237,50 @@ class DataWorker(QtCore.QObject):
         if KW['fid'] is not None:
             KW['fid'].close()
         
+        ####################################
+        #####    BANDPASS FILTERING    #####
+        ####################################
+        
         for iprb,probe in enumerate(probe_group.probes):
             hdr = f'ANALYZING PROBE {iprb+1} / {nprobes}<br>'
             LFP_dict = ff[str(iprb)]['LFP']
             LFP_raw = LFP_dict['raw']; NCH = len(LFP_raw)
             shank_ids = np.array(probe.shank_ids, dtype='int')
             # bandpass filter signals and get mean channel amplitudes
+            for k in ['theta', 'slow_gamma', 'fast_gamma', 'swr', 'ds']:
+                #del LFP_dict[k]
+                LFP_dict.create_dataset(k, (NCH, NSAMPLES_DN_TRUNC), dtype='float32')
+                
             self.progress_signal.emit(hdr + '<br>Bandpass filtering signals ...')
-            std_dict = {}
-            for fb in ['theta', 'slow_gamma', 'fast_gamma', 'swr_freq', 'ds_freq']:
-                fbk = fb.replace('_freq','')
-                try:
-                    farr = LFP_dict.create_dataset(fbk, dtype='float32', 
-                                    data=pyfx.butter_bandpass_filter(LFP_raw, *PARAMS[fb], 
-                                                                     lfp_fs=lfp_fs, axis=1))
-                    std_dict[fbk] = np.std(farr, axis=1)
-                    std_dict[f'norm_{fbk}'] = pyfx.Normalize(std_dict[fbk])
-                except Exception as e:
-                    self.quit_thread(f'Filtering Error: {str(e)}', ff=ff)
-                    return
+            KW2 = {'lfp_fs':lfp_fs, 'axis':1}
+            
+            try:
+                arr_list = np.array_split(LFP_raw, int(np.ceil(NSAMPLES_DN_TRUNC / ichunk)), axis=1)
+                p = 0
+                for i,yarr in enumerate(arr_list):
+                    q = p + yarr.shape[1]
+                    LFP_dict['theta'][:,p:q] = pyfx.butter_bandpass_filter(yarr, *PARAMS['theta'], **KW2)
+                    LFP_dict['slow_gamma'][:,p:q] = pyfx.butter_bandpass_filter(yarr, *PARAMS['slow_gamma'], **KW2)
+                    LFP_dict['fast_gamma'][:,p:q] = pyfx.butter_bandpass_filter(yarr, *PARAMS['fast_gamma'], **KW2)
+                    LFP_dict['swr'][:,p:q] = pyfx.butter_bandpass_filter(yarr, *PARAMS['swr_freq'], **KW2)
+                    LFP_dict['ds'][:,p:q] = pyfx.butter_bandpass_filter(yarr, *PARAMS['ds_freq'], **KW2)
+                    p += yarr.shape[1]
+                std_dict = {}
+                for k,arr in LFP_dict.items():
+                    std_dict[k] = np.std(arr, axis=1)
+                    std_dict[f'norm_{k}'] = pyfx.Normalize(std_dict[k])
+            except Exception as e:
+                self.quit_thread(f'Filtering Error: {str(e)}', ff=ff)
+                return
             STD = pd.DataFrame(std_dict)
             STD.to_hdf(ff.filename, key=f'/{iprb}/STD')
+            
+            
+            ####################################
+            #####      EVENT DETECTION     #####
+            ####################################
+            
+            
             # initial ripple and DS detection for each channel
             progress_txt = hdr + f'<br>Detecting DSs and ripples on channel<br>%s / {NCH} ...'
             SWR_DF, DS_DF, SWR_THRES, DS_THRES = None, None, None, None
@@ -258,7 +300,7 @@ class DataWorker(QtCore.QObject):
                 except Exception as e:
                     self.quit_thread(f'DS Detection Error: {str(e)}', ff=ff)
                     return
-            # save event dataframes and thresholds
+            # add status columns for later curation
             for DF in [SWR_DF, DS_DF]:
                 if DF.size == 0: DF.loc[0] = np.nan
                 DF['status'] = 1 # 1=auto-detected; 2=added by user; -1=removed by user
@@ -274,6 +316,10 @@ class DataWorker(QtCore.QObject):
                 THRES_DF.to_hdf(ff.filename, key=f'/{iprb}/{ek.upper()}_THRES')
             # initialize noise train
             ff[str(iprb)]['NOISE'] = np.zeros(NCH, dtype='int')
+            
+        ##########################################
+        #####    SAVE PROBE/PARAM SETTINGS   #####
+        ##########################################
             
         # initialize event channel dictionary with [None,None,None]
         _ = ephys.init_event_channels(save_ddir, probes=probe_group.probes, psave=True)
@@ -298,8 +344,8 @@ class DataWorker(QtCore.QObject):
 ################                                              ################
 ##############################################################################
 ##############################################################################
-
-
+        
+    
 class RawRecordingSelectionWidget(gi.FileSelectionWidget):
     """ Handles raw recording selection and validation """
     
@@ -763,6 +809,7 @@ class RawArrayPopup(QtWidgets.QDialog):
 
 class RawRecordingSelectionPopup(QtWidgets.QDialog):
     """ Data processing GUI for raw recording selection and probe assignment """
+    recording = None
     last_saved_ddir = None
     
     def __init__(self, init_ppath=None, parent=None):
@@ -830,7 +877,8 @@ class RawRecordingSelectionPopup(QtWidgets.QDialog):
         settings_vlay = QtWidgets.QVBoxLayout(self.settings_w)
         settings_vlay.setContentsMargins(0,0,0,0)
         # initialize main parameter input widget, embed in scroll area
-        self.params_widget = qparam.ParamObject(params=dict(self.PARAMS), mode='data_processing', parent=self)
+        self.params_widget = qparam.ParamObject(params=dict(self.PARAMS), 
+                                                mode='data_processing', parent=self)
         self.qscroll = QtWidgets.QScrollArea()
         self.qscroll.horizontalScrollBar().hide()
         self.qscroll.setWidgetResizable(True)
@@ -839,29 +887,28 @@ class RawRecordingSelectionPopup(QtWidgets.QDialog):
         self.qscroll.setMaximumHeight(qh)
         self.qscroll.hide()
         # create settings button to show/hide param widgets
+        self.params_bar = QtWidgets.QPushButton('Settings')
+        self.params_bar.setCheckable(True)
+        self.params_bar.setFocusPolicy(QtCore.Qt.NoFocus)
+        self.params_bar.setStyleSheet(pyfx.dict2ss(QSS.EXPAND_PARAMS_BTN))
+        # create icon to indicate warnings about 1 or more parameter inputs
+        self.params_warning_btn = QtWidgets.QPushButton()
+        self.params_warning_btn.setObjectName('params_warning')
+        self.params_warning_btn.setCheckable(True)
+        self.params_warning_btn.setFlat(True)
+        self.params_warning_btn.setFixedSize(25,25)
+        self.params_warning_btn.setEnabled(False)
+        self.params_warning_btn.setStyleSheet(pyfx.dict2ss(QSS.ICON_BTN))
+        self.params_warning_btn.setFlat(True)
+        self.params_warning_btn.hide()
+        # create button to access base folder popup
+        self.base_folder_btn = QtWidgets.QPushButton('Set base folders ... ')
+        self.base_folder_btn.setAutoDefault(False)
+        self.base_folder_btn.setFocusPolicy(QtCore.Qt.NoFocus)
         bbar = QtWidgets.QHBoxLayout()
-        self.settings_btn0 = QtWidgets.QPushButton('Settings')
-        self.settings_btn0.setStyleSheet('QPushButton {'
-                                         'border : 1px solid rgba(0,0,0,50);'
-                                         'background-color : rgba(0,0,0,10);'
-                                         'color : black;'
-                                         'icon : url(:/icons/settings.png);'
-                                         'padding : 2px;'
-                                         '}')
-        self.settings_btn = QtWidgets.QPushButton()
-        self.settings_btn.setStyleSheet('QPushButton {'
-                                        'icon : url(:/icons/double_chevron_down.png);'
-                                        'padding : 2px;'
-                                        'outline : none;}'
-                                        'QPushButton:checked {'
-                                        'icon : url(:/icons/double_chevron_up.png);}')
-        self.settings_btn.setFocusPolicy(QtCore.Qt.NoFocus)
-        self.settings_btn.setFixedWidth(self.settings_btn.sizeHint().height())
-        self.settings_btn.setCheckable(True)
-        #self.settings_btn.setChecked(True)
-        self.settings_btn.toggled.connect(lambda x: self.qscroll.setVisible(x))
-        bbar.addWidget(self.settings_btn0)
-        bbar.addWidget(self.settings_btn)
+        bbar.addWidget(self.params_warning_btn, stretch=0)
+        bbar.addWidget(self.params_bar, stretch=2)
+        bbar.addWidget(self.base_folder_btn, stretch=0)
         settings_vlay.addLayout(bbar)
         settings_vlay.addWidget(self.qscroll)
         
@@ -875,15 +922,15 @@ class RawRecordingSelectionPopup(QtWidgets.QDialog):
         bbox = QtWidgets.QHBoxLayout()
         self.back_btn = QtWidgets.QPushButton('Back')
         self.back_btn.setVisible(False)
-        self.extract_btn = QtWidgets.QPushButton('Map to probe(s)')
-        #self.extract_btn.setStyleSheet(blue_btn_ss)
-        self.extract_btn.setEnabled(False)
+        self.probe_map_btn = QtWidgets.QPushButton('Map to probe(s)')
+        #self.probe_map_btn.setStyleSheet(blue_btn_ss)
+        self.probe_map_btn.setEnabled(False)
         self.pipeline_btn = QtWidgets.QPushButton('Process data!')
         #self.pipeline_btn.setStyleSheet(blue_btn_ss)
         self.pipeline_btn.setVisible(False)
         self.pipeline_btn.setEnabled(False)
         bbox.addWidget(self.back_btn)
-        bbox.addWidget(self.extract_btn)
+        bbox.addWidget(self.probe_map_btn)
         bbox.addWidget(self.pipeline_btn)
         # set central layout
         self.layout.addWidget(self.ddir_gbox)
@@ -908,21 +955,18 @@ class RawRecordingSelectionPopup(QtWidgets.QDialog):
         self.fsw.ppath_btn.clicked.connect(self.fsw.select_filepath)
         self.fsw.signal.connect(self.ppath_updated)
         self.fsw.read_array_signal.connect(self.load_array_worker)
-        self.extract_btn.clicked.connect(self.extractor_worker)
+        self.params_widget.warning_update_signal.connect(self.update_param_warnings)
+        self.probe_map_btn.clicked.connect(self.start_probe_assignment)
         self.pipeline_btn.clicked.connect(self.pipeline_worker)
         self.back_btn.clicked.connect(self.back_to_selection)
         self.save_ddir_btn.clicked.connect(self.set_save_ddir)
-        
-    def ppath_updated(self, x):
-        """ If raw data source is valid, enable probe assignment step """
-        if x:
-            ppath = self.fsw.le.text()
-            data_type = dp.get_data_format(ppath)
-        else:
-            data_type = None
-        for k,btn in self.radio_btns.items():
-            btn.setChecked(k==data_type)
-        self.extract_btn.setEnabled(x)
+        self.params_bar.toggled.connect(lambda x: self.qscroll.setVisible(x))
+        self.params_bar.toggled.connect(lambda x: self.params_warning_btn.setChecked(x))
+        self.base_folder_btn.clicked.connect(self.base_folder_popup)
+    
+    def update_param_warnings(self, n, ddict):
+        """ Show warning button if 1+ parameter widgets are flagged """
+        self.params_warning_btn.setVisible(n > 0)
         
     def update_probe_config(self):
         """ If probe assignment is valid, enable processing step """
@@ -994,17 +1038,27 @@ class RawRecordingSelectionPopup(QtWidgets.QDialog):
         gi.MsgboxError(error_msg).exec()
         self.fsw.update_filepath(ppath, False)
     
-    ### recording extractor
-        
-    def extractor_worker(self):
+    def ppath_updated(self, x):
+        """ If raw data source is valid, enable probe assignment step """
+        if x:
+            ppath = self.fsw.le.text()
+            data_type = dp.get_data_format(ppath)
+        else:
+            data_type = None
+        for k,btn in self.radio_btns.items():
+            btn.setChecked(k==data_type)
+        self.probe_map_btn.setEnabled(x)
+        if x:
+            self.extractor_worker(ppath, data_type)
+    
+    def extractor_worker(self, ppath, data_type):
         """ Worker instantiates a spikeinterface Extractor for a raw recording """
-        ppath = self.fsw.le.text()
-        data_type = dp.get_data_format(ppath)
         data_array, metadata = None, {}
         if data_type in ['NPY','MAT']:  # create recording from loaded data/metadata
             data_array, metadata = self.fsw.data_array, self.fsw.meta
             if data_array.shape[0] == metadata['nch']:
                 data_array = data_array.T  # rows=samples, columns=channels
+                
         # create extractor worker
         self.worker_object = ExtractorWorker(ppath, data_array, metadata)
         self.worker_object.data_signal.connect(self.extractor_finished_slot)
@@ -1015,6 +1069,17 @@ class RawRecordingSelectionPopup(QtWidgets.QDialog):
     def extractor_finished_slot(self, recording):
         """ Worker returned valid extractor object """
         self.recording = recording
+        META = dp.get_meta_from_recording(self.recording)
+        # update parameter widgets with loaded recording
+        self.params_widget.lfp_fs.set_fs(float(META['fs']))
+        self.params_widget.trange.set_duration(self.recording.get_duration())
+    
+    @QtCore.pyqtSlot(str)
+    def extractor_error_slot(self, error_msg):
+        """ Worker encountered an error while extracting recording """
+        gi.MsgboxError(error_msg).exec()
+        
+    def start_probe_assignment(self):
         NCH = self.recording.get_num_channels()
         # initialize probe box
         self.paw = ProbeAssignmentWidget(NCH)
@@ -1023,9 +1088,9 @@ class RawRecordingSelectionPopup(QtWidgets.QDialog):
         self.probe_gbox.setVisible(True)
         self.save_gbox.setVisible(True)
         self.back_btn.setVisible(True)
-        self.extract_btn.setVisible(False)
+        self.probe_map_btn.setVisible(False)
         self.pipeline_btn.setVisible(True)
-        self.settings_btn.setChecked(False)
+        
         # initialize save box
         ppath = self.recording.get_annotation('ppath')
         raw_ddir = os.path.dirname(ppath)
@@ -1038,22 +1103,28 @@ class RawRecordingSelectionPopup(QtWidgets.QDialog):
         # disable data loading
         self.ddir_gbox.setEnabled(False)
         self.setWindowTitle('Map to probe(s)')
-        
-    @QtCore.pyqtSlot(str)
-    def extractor_error_slot(self, error_msg):
-        """ Worker encountered an error while extracting recording """
-        gi.MsgboxError(error_msg).exec()
-        
+        pyfx.center_window(self)
+    
     ### processing pipeline
     
     def pipeline_worker(self):
         """ Worker starts the processing pipeline """
+        META = dp.get_meta_from_recording(self.recording)
         # create probe group with all probe objects used in the recording
         self.PROBE_GROUP = self.assemble_probe_group()
         # get updated analysis parameters
         PARAMS = self.params_widget.DEFAULTS  # validated input params
         param_dict = self.params_widget.ddict_from_gui()[0]  # current data processing params
         PARAMS.update(param_dict)
+        
+        #pdb.set_trace()
+        # check that FS is evenly divisible by lfp_fs
+        # check that lfp_fs is high enough to filter by all freq bands
+        #     e.g. lfp_fs = 250, swr_freq = [120, 180]
+        #          Nyquist freq = 0.5 * lfp_fs = 125
+        #          Critical frequencies = freq_band/nyq = [120/125, 180/125] = [0.96, 1.44]
+        #          * These must be between 0 and 1
+        
         # create empty folder for processed data
         save_ddir = self.save_le.text()
         if os.path.isdir(save_ddir):
@@ -1110,17 +1181,32 @@ class RawRecordingSelectionPopup(QtWidgets.QDialog):
     def back_to_selection(self):
         """ Return to the raw data selection step """
         self.setWindowTitle('Select a raw data source')
+        self.recording = None
         self.back_btn.setVisible(False)
-        self.extract_btn.setVisible(True)
+        self.probe_map_btn.setVisible(True)
         self.pipeline_btn.setVisible(False)
         self.ddir_gbox.setEnabled(True)
         self.probe_gbox.setVisible(False)
         self.save_gbox.setVisible(False)
+        self.params_widget.trange.set_duration(np.inf)
+        self.params_widget.lfp_fs.set_fs(None)
         # delete probe assignment widget
         self.probe_vbox.removeWidget(self.paw)
         self.paw.deleteLater()
         self.paw = None
-        
+    
+    def base_folder_popup(self):
+        """ Allow user to set base folders from pipeline GUI """
+        raw_ddir, probe_ddir, probe_file, _ = ephys.base_dirs()
+        self.basedirs_popup = gi.BaseFolderPopup()
+        self.basedirs_popup.widget.param_w.hide() # cannot change param file
+        if self.basedirs_popup.exec():
+            raw_ddir2, probe_ddir2, probe_file2, _ = ephys.base_dirs()
+            # if current filepath is the raw data folder, update it
+            if (self.fsw.le.text()==raw_ddir) and raw_ddir != raw_ddir2:
+                self.fsw.update_filepath(raw_ddir2)
+            # update default probe configuration file
+            self.default_probe_file = str(probe_file2)
         
 if __name__ == '__main__':
     app = pyfx.qapp()
@@ -1128,7 +1214,6 @@ if __name__ == '__main__':
     init_ddir = str(qfd.directory().path())
     if init_ddir == os.getcwd():
         init_ddir=None
-    
     w = RawRecordingSelectionPopup()
     w.show()
     w.raise_()
