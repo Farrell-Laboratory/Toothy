@@ -6,9 +6,11 @@ Parameter management
 @author: amandaschott
 """
 import os
-from PyQt5 import QtWidgets, QtCore
+import numpy as np
+from PyQt5 import QtWidgets, QtCore, QtGui
 import pdb
 # custom modules
+import QSS
 import pyfx
 
 
@@ -33,6 +35,7 @@ def get_original_defaults():
     'ds_freq' : [5.0, 100.0],
     'swr_freq' : [120.0, 180.0],
     'ds_height_thr' : 4.5,
+    'ds_abs_thr'  : 0.3,
     'ds_dist_thr' : 100.0,
     'ds_prom_thr' : 0.0,
     'ds_wlen' : 125.0,
@@ -81,6 +84,7 @@ def get_param_info():
     'swr_freq'   : ['Ripple bandpass filter', 'Bandpass filter cutoff frequencies (Hz) for detecting sharp-wave ripples.'],
                   
     'ds_height_thr' : ['DS height', 'Minimum peak height (standard deviations) of a dentate spike.'],
+    'ds_abs_thr'    : ['DS voltage', 'Minimum absolute peak height (mV) of a dentate spike.'],
     'ds_dist_thr'   : ['DS separation', 'Minimum distance (ms) between neighboring dentate spikes.'],
     'ds_prom_thr'   : ['DS prominence', 'Minimum dentate spike prominence (relative to the surrounding signal).'],
     'ds_wlen'       : ['DS window length', 'Window size (ms) for evaluating dentate spikes.'],
@@ -117,6 +121,7 @@ def get_param_info():
     }
     
     return PARAM_INFO
+    
 
 def validate_params(ddict):
     """ Determine whether input $ddict is a valid parameter dictionary
@@ -139,6 +144,7 @@ def validate_params(ddict):
         try: val = ddict[key]
         except: return False
         return bool(val in options)
+    
         
     # make sure each parameter 1) is present in dictionary and 2) has a valid value
     valid_ddict = {
@@ -150,6 +156,7 @@ def validate_params(ddict):
                   'ds_freq' : is_range('ds_freq'),
                   'swr_freq' : is_range('swr_freq'),
                   'ds_height_thr' : is_number('ds_height_thr'),
+                  'ds_abs_thr'  : is_number('ds_abs_thr'),
                   'ds_dist_thr' : is_number('ds_dist_thr'),
                   'ds_prom_thr' : is_number('ds_prom_thr'),
                   'ds_wlen' : is_number('ds_wlen'),
@@ -184,6 +191,7 @@ def validate_params(ddict):
                   }
     is_valid = bool(all(valid_ddict.values()))
     return is_valid, valid_ddict
+    
 
 def fix_params(ddict, default_dict=None):
     """ Fill in missing/invalid parameters with default values """
@@ -281,10 +289,11 @@ def write_param_file(PARAMS, filepath='default_params.txt'):
 ##############################################################################
 
 
-class Spinbox(QtWidgets.QDoubleSpinBox):
-    """ QDoubleSpinBox for numerical parameter values (e.g. detection thresholds) """
+class BaseParamWidget(QtWidgets.QWidget):
+    """ Base functions, signals, and attributes for managing parameter inputs """
     
     param_changed_signal = QtCore.pyqtSignal()
+    param_warning_signal = QtCore.pyqtSignal()
     
     def __init__(self, key, isvalid=True, parent=None):
         super().__init__(parent)
@@ -292,95 +301,333 @@ class Spinbox(QtWidgets.QDoubleSpinBox):
         self.setObjectName(key)
         self.isvalid = isvalid
         self.wheelEvent = lambda event: None
-        self.ss = 'QAbstractSpinBox {background-color : %s; color : %s;}'
-        self.valueChanged.connect(self.param_changed_signal.emit)
-    
+        self.ss_list = [pyfx.dict2ss(QSS.PARAM_INPUTS_OFF), 
+                        pyfx.dict2ss(QSS.PARAM_INPUTS)]
+        
     def set_widget_valid(self, x):
         """ Update widget style sheet for valid or invalid value """
         self.isvalid = bool(x)
-        ss = self.ss % [('red','transparent'),('white','black')][int(x)]
-        self.setStyleSheet(ss)
+        self.setStyleSheet(self.ss_list[int(x)])
+        
+    def set_warning(self, x, qitem=None, tooltip='Potential input error.'):
+        """ Flag potential errors with a warning icon/message """
+        if qitem is None: return
+        qact = qitem.qact
+        caution_icon = QtGui.QIcon(':/icons/warning_yellow.png')
+        if x:
+            qact.setIcon(caution_icon)
+            qact.setToolTip(tooltip)
+        else:
+            qact.setIcon(QtGui.QIcon())
+            qact.setToolTip(None)
+        qitem.warning = bool(x)
+        self.param_warning_signal.emit()
+            
+    def sbox_from_kwargs(self, **kwargs):
+        """ QAbstractSpinBox for numeric inputs """
+        double = kwargs.get('double', True)
+        alignment = kwargs.get('alignment', QtCore.Qt.AlignLeft)
+        if double: box = QtWidgets.QDoubleSpinBox()
+        else:      box = QtWidgets.QSpinBox()
+        box.setAlignment(alignment)
+        box.wheelEvent = lambda event: None
+        box.setKeyboardTracking(False)
+        box.setSuffix(kwargs.get('suffix'))
+        rg = [kwargs.get(k, box.property(k)) for k in ['minimum','maximum']]
+        step = kwargs.get('step', box.singleStep())
+        if not double: rg = [*map(int, rg)]; step=int(step)
+        box.setRange(*rg)
+        box.setSingleStep(step)
+        if double:
+            box.setDecimals(kwargs.get('decimals', box.decimals()))
+        if 'icon' in kwargs:
+            box.qact = box.lineEdit().addAction(kwargs['icon'],
+                                                QtWidgets.QLineEdit.TrailingPosition)
+        return box
+    
+    def cbox_from_kwargs(self, **kwargs):
+        """ QComboBox for categorical inputs """
+        cbox = QtWidgets.QComboBox()
+        if 'items' in kwargs:
+            cbox.addItems(kwargs['items'])
+        cbox.wheelEvent = lambda event: None
+        cbox.qact = QtWidgets.QPushButton()
+        cbox.qact.setObjectName('params_warning')
+        cbox.qact.setStyleSheet(pyfx.dict2ss(QSS.ICON_BTN))
+        return cbox
+    
+    
+class Spinbox(BaseParamWidget):
+    """ Individual numeric inputs (e.g. detection thresholds) """
+    
+    def __init__(self, key, isvalid=True, parent=None, **kwargs):
+        super().__init__(key, isvalid=isvalid, parent=parent)
+        kwargs['icon'] = QtGui.QIcon()
+        self.box = self.sbox_from_kwargs(**kwargs)
+        self.box.setObjectName('box')
+        self.box.warning = False
+        self.box.valueChanged.connect(lambda x: self.param_changed_signal.emit())
+        hlay = pyfx.get_widget_container('h', self.box)
+        self.setLayout(hlay)
+        
+    def set_warning(self, x, qitem=None, tooltip='Potential input error.'):
+        super().set_warning(x, qitem=self.box, tooltip=tooltip)
     
     def get_param_value(self):
-        """ Return widget value """
-        return self.value()
+        """ Return spinbox value """
+        return self.box.value()
+    
+    def update_param(self, val):
+        """ Set spinbox value """
+        pyfx.stealthy(self.box, val)
+
+
+class SpinboxLfpFS(Spinbox):
+    """ Downsampling factor for processed data """
+    
+    def __init__(self, *args, fs=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fs = fs
+        self.box.valueChanged.connect(self.check_downsampling_factor)
+    
+    def check_downsampling_factor(self):
+        """ Check if original FS is a multiple of the downsampled FS """
+        if self.fs is None: return
+        lfp_fs = self.box.value()
+        ds_factor = self.fs / lfp_fs
+        x = (self.fs/lfp_fs != int(self.fs/lfp_fs))
+        tt = (f'WARNING: Raw recording ({self.fs} Hz) not evenly divisible by '
+              f'the target sampling rate ({lfp_fs} Hz).')
+        self.set_warning(x, tooltip=tt)
+    
+    def set_fs(self, fs):
+        """ Update original recording FS """
+        self.fs = fs
+        self.check_downsampling_factor()
+        if self.fs is None:
+            self.set_warning(False)
         
     def update_param(self, val):
-        """ Set widget value """
-        self.blockSignals(True)
-        self.setValue(val)
-        self.blockSignals(False)
-        
-        
-class SpinboxRange(QtWidgets.QWidget):
-    """ Pair of QDoubleSpinBoxes for parameter ranges (e.g. frequency bands) """
+        """ Update current downsampling factor """
+        super().update_param(val)
+        self.check_downsampling_factor()
+
+
+class SpinboxRange(BaseParamWidget):
+    """ Paired numeric inputs (e.g. parameter ranges) """
     
-    param_changed_signal = QtCore.pyqtSignal()
-    
-    def __init__(self, key, isvalid=True, double=False, alignment=QtCore.Qt.AlignLeft, 
-                 parent=None, **kwargs):
-        super().__init__(parent)
-        self.key = key
-        self.setObjectName(key)
-        self.isvalid = isvalid
-        if double:
-            self.box0 = QtWidgets.QDoubleSpinBox()
-            self.box1 = QtWidgets.QDoubleSpinBox()
-        else:
-            self.box0 = QtWidgets.QSpinBox()
-            self.box1 = QtWidgets.QSpinBox()
+    def __init__(self, key, isvalid=True, parent=None, **kwargs):
+        super().__init__(key, isvalid=isvalid, parent=parent)
+        kwargs['icon'] = QtGui.QIcon()
+        self.box0 = self.sbox_from_kwargs(**kwargs)
+        self.box1 = self.sbox_from_kwargs(**kwargs)
         self.boxes = [self.box0, self.box1]
-        for box in self.boxes:
-            box.wheelEvent = lambda event: None
-            box.setAlignment(alignment)
-            if 'suffix' in kwargs: box.setSuffix(kwargs['suffix'])
-            if 'minimum' in kwargs: box.setMinimum(kwargs['minimum'])
-            if 'maximum' in kwargs: box.setMaximum(kwargs['maximum'])
-            if 'decimals' in kwargs: box.setDecimals(kwargs['decimals'])
-            if 'step' in kwargs: box.setSingleStep(kwargs['step'])
-            box.valueChanged.connect(lambda: self.param_changed_signal.emit())
-            
         self.dash = QtWidgets.QLabel(' — ')
         self.dash.setAlignment(QtCore.Qt.AlignCenter)
+        hlay = pyfx.get_widget_container('h', self.box0, self.dash, self.box1, 
+                                         stretch_factors=[2,0,2], spacing=0)
+        self.setLayout(hlay)
+        # input 2 must always be greater than input 1
+        self.min_separation = self.get_min_separation(kwargs.get('min_separation', 0))
+        self.box1.setMinimum(self.box0.minimum() + self.min_separation)
+        self.box0.setMaximum(self.box1.maximum() - self.min_separation)
+        for i,box in enumerate(self.boxes):
+            box._min = box.minimum()
+            box._max = box.maximum()
+            box.setObjectName(f'box{i}')
+            box.warning = False
         
-        self.layout = QtWidgets.QHBoxLayout(self)
-        self.layout.setContentsMargins(0,0,0,0)
-        self.layout.setSpacing(0)
-        self.layout.addWidget(self.box0, stretch=2)
-        self.layout.addWidget(self.dash, stretch=0)
-        self.layout.addWidget(self.box1, stretch=2)
-        self.ss = ('QAbstractSpinBox {background-color : %s; color : %s;}')
-    
-    def set_widget_valid(self, x):
-        """ Update widget style sheet for valid or invalid value """
-        self.isvalid = bool(x)
-        ss = self.ss % [('red','transparent'),('white','black')][int(x)]
-        self.setStyleSheet(ss)
-    
+        self.box0.valueChanged.connect(lambda _: self.range_updated(self.box0))
+        self.box1.valueChanged.connect(lambda _: self.range_updated(self.box1))
+        
+    def get_min_separation(self, minsep):
+        """ Minimum distance between range bounds """
+        self.dec = self.box0.decimals() if hasattr(self.box0, 'decimals') else 0
+        min_separation = np.ceil(minsep * 10**self.dec) / 10**self.dec
+        return min_separation
+        
+    def range_updated(self, *boxes, block=False):
+        """ Dynamically adjust min/max limits to maintain valid range """
+        for box in boxes:
+            obox = self.boxes[1-self.boxes.index(box)]
+            if box == self.box0:
+                self.stealthy_minmax(obox, mmin=box.value()+self.min_separation)
+            elif box == self.box1:
+                self.stealthy_minmax(obox, mmax=box.value()-self.min_separation)
+        if not block:
+            self.param_changed_signal.emit()
+       
+    def reset_minmaxes(self):
+        """ Reset min/max limits to original parameter range """
+        for box in self.boxes:
+            self.stealthy_minmax(box, box._min, box._max)
+        
+    def stealthy_minmax(self, box, mmin=None, mmax=None):
+        """ Adjust input minimum and/or maximum """
+        box.blockSignals(True)
+        if mmin is not None: box.setMinimum(mmin)
+        if mmax is not None: box.setMaximum(mmax)
+        box.blockSignals(False)
+        
     def get_param_value(self):
-        """ Return widget values """
+        """ Return parameter range """
         return [self.box0.value(), self.box1.value()]
     
     def update_param(self, val):
-        """ Set widget values """
-        for i,val in enumerate(val):
-            self.boxes[i].blockSignals(True)
-            self.boxes[i].setValue(val)
-            self.boxes[i].blockSignals(False)
+        """ Set parameter range """
+        self.reset_minmaxes()  # reset full spinbox range and update values
+        _ = [pyfx.stealthy(box, x) for box,x in zip(self.boxes, val)]
+        self.range_updated(*self.boxes, block=True)
 
 
-class Combobox(QtWidgets.QComboBox):
-    """ QComboBox for categorical parameter values """
+class SpinboxFreqRange(SpinboxRange):
+    """ Filtering frequency bands """
     
-    param_changed_signal = QtCore.pyqtSignal()
-    
-    def __init__(self, key, isvalid=True, parent=None):
-        super().__init__(parent)
-        self.key = key
-        self.setObjectName(key)
-        self.isvalid = isvalid
-        self.wheelEvent = lambda event: None
+    def __init__(self, *args, lfp_fs=None, **kwargs):
+        kwargs['min_separation'] = kwargs.get('min_separation', 0.5)
+        super().__init__(*args, **kwargs)
+        self.lfp_fs = lfp_fs
         
+    def check_filter_bands(self):
+        """ Check if downsampled FS is twice the highest frequency component """
+        if self.lfp_fs is None: return
+        f0, f1 = self.get_param_value()
+        maxf = 0.5*self.lfp_fs
+        tt = f'WARNING: Frequency component exceeds the Nyquist limit of {maxf} Hz.'
+        self.set_warning(f0/maxf > 1, qitem=self.box0, tooltip=tt)
+        self.set_warning(f1/maxf > 1, qitem=self.box1, tooltip=tt)
+    
+    def set_lfp_fs(self, lfp_fs):
+        """ Update target downsampling rate """
+        self.lfp_fs = lfp_fs
+        self.check_filter_bands()
+        
+    def range_updated(self, *boxes, block=False):
+        """ Update frequency range """
+        super().range_updated(*boxes, block=block)
+        #if self.lfp_fs is None: return
+        self.check_filter_bands()
+    
+    
+class SpinboxTimeRange(SpinboxRange):
+    """ Time range (tstart - tend) for a subset of a recording """
+    
+    def __init__(self, *args, dur=np.inf, **kwargs):
+        # positive values = X seconds from the start of the recording
+        # negative values = X seconds back from the end of the recording
+        # e.g. [10, -10] is everything but the first and last 10 seconds
+        self.dec = kwargs.get('decimals', 2)
+        self.dur = np.ceil(dur * 10**self.dec) / 10**self.dec
+        kwargs.update({'double':True, 'minimum' : -self.dur, 'maximum' : self.dur, 
+                       'decimals':self.dec,'min_separation' : kwargs.get('min_separation', 1)})
+        super().__init__(*args, **kwargs)
+        for i,box in enumerate(self.boxes):
+            box.abs_btn = QtWidgets.QPushButton()
+            box.abs_btn.setStyleSheet(pyfx.dict2ss(QSS.TRANGE_TOGGLE_BTN))
+            box.abs_btn.setFixedWidth(15)
+        self.enable_disable_toggles()
+        # use the end of the recording as the end of the interval
+        self.end_chk = QtWidgets.QCheckBox('End')
+        self.end_chk.toggled.connect(self.set_endpoint)
+        self.layout().insertWidget(1, self.box0.abs_btn, stretch=0)
+        self.layout().addWidget(self.box1.abs_btn, stretch=0)
+        self.layout().addSpacing(5)
+        self.layout().addWidget(self.end_chk, stretch=0)
+        
+        self.box0.abs_btn.clicked.connect(lambda: self.toggle_abs(self.box0))
+        self.box1.abs_btn.clicked.connect(lambda: self.toggle_abs(self.box1))
+        
+        pyfx.stealthy(self.box1, -1)
+        self.box0._t = self.box0.value()
+        self.box1._t = self.box1.value()
+        
+    def range_updated(self, box, block=False):
+        """ Update timepoints to maintain valid interval """
+        if box == self.box1 and self.box1.value() == 0:
+            if self.box1._t == -1:
+                pyfx.stealthy(self.box1, 1)
+            else:
+                pyfx.stealthy(self.box1, -1)
+        t0, t1 = self.get_param_value()
+        if (t0 >= 0) == (t1 > 0):
+            tgap = t0 - (t1-self.min_separation)
+        else:
+            t0a, t1a = map(self.get_abs, self.boxes)
+            tgap = t0a - (t1a-self.min_separation)
+        if 0 < tgap < np.inf:
+            if box==self.box0:
+                pyfx.stealthy(box, t0 - tgap)
+            else:
+                pyfx.stealthy(box, t1 + tgap)
+        for box in self.boxes:
+            box._t = box.value()
+        if not block:
+            self.param_changed_signal.emit()
+    
+    def set_endpoint(self, x):
+        """ Adjust interval end or lock to the recording end (check box) """
+        self.box1.setEnabled(not x)
+        if x:
+            pyfx.stealthy(self.box1, -1)
+    
+    def toggle_abs(self, box):
+        """ Convert between relative and absolute timepoints """
+        thr = self.boxes.index(box)
+        val = box.value()
+        if val >= thr:
+            box.setValue(val - self.dur) # from the end --> from the start
+        else:
+            box.setValue(self.get_abs(box))
+            
+    def get_abs(self, box):
+        """ Get absolute timepoints """
+        thr = self.boxes.index(box) # below 0 for tstart, including 0 for tend
+        val = box.value()
+        if val >= thr: # return absolute timepoints
+            return val
+        if val == -1:
+            val += thr
+        return self.dur + val
+    
+    def enable_disable_toggles(self):
+        """ Disable timepoint conversion if duration of recording is unknown """
+        for i,box in enumerate(self.boxes):
+            box.abs_btn.setEnabled(self.dur < np.inf)
+            #x = (self.dur < np.inf) and (box.value() < 0+i)
+            #box.abs_btn.setEnabled(x)
+    
+    def update_param(self, val):
+        """ Set time range """
+        # reset full spinbox range and update values
+        _ = [pyfx.stealthy(box, x) for box,x in zip(self.boxes, val)]
+        is_end = (-1 <= self.box1.value() <= 0)
+        pyfx.stealthy(self.end_chk, is_end)
+        self.set_endpoint(is_end)
+        self.range_updated(self.box0, block=True)
+    
+    def set_duration(self, dur):
+        """ Update recording duration (np.inf if no recording is loaded) """
+        self.dur = np.ceil(dur * 10**self.dec) / 10**self.dec
+        self.stealthy_minmax(self.box0, -self.dur, self.dur-self.min_separation)
+        self.stealthy_minmax(self.box1, -self.dur+self.min_separation, self.dur)
+        for box in self.boxes:
+            box._min = box.minimum()
+            box._max = box.maximum()
+        self.range_updated(self.box0, block=True)
+        self.enable_disable_toggles()
+
+
+class Combobox(BaseParamWidget):
+    """ QComboBox for categorical parameters (e.g. clustering algorithms) """
+    
+    def __init__(self, key, isvalid=True, parent=None, **kwargs):
+        #super().__init__(parent)
+        super().__init__(key, isvalid=isvalid, parent=parent)
+        self.cbox = self.cbox_from_kwargs(**kwargs)
+        self.cbox.setObjectName('cbox')
+        self.cbox.warning = False
+        
+        # convert item labels to variable names
         if key in ['csd_method', 'f_type', 'el_shape']:
             self.get_valtxt = lambda val: val.capitalize()
             self.export_valtxt = lambda txt: txt.lower()
@@ -391,31 +638,37 @@ class Combobox(QtWidgets.QComboBox):
             self.get_valtxt = lambda val: dict(kmeans='K-means', dbscan='DBSCAN')[val]
             self.export_valtxt = lambda txt: txt.replace('-','').lower()
         
-        self.ss = ('QComboBox {color : black;}'
-                   'QComboBox:open {background-color : %s; color : %s;}')
-        self.currentIndexChanged.connect(self.param_changed_signal.emit)
-        self.activated.connect(lambda i: self.set_widget_valid(True))
-    
-    def set_widget_valid(self, x):
-        self.isvalid = bool(x)
-        ss = self.ss % [('red','transparent'),('white','black')][int(x)]
-        self.setStyleSheet(ss)
+        hlay = pyfx.get_widget_container('h', self.cbox, self.cbox.qact,
+                                         stretch_factors=[2,0], spacing=0)
+        self.cbox.qact.hide()
+        self.setLayout(hlay)
+        
+        self.cbox.currentIndexChanged.connect(lambda x: self.param_changed_signal.emit())
+        self.cbox.activated.connect(lambda i: self.set_widget_valid(True))
         
     def get_param_value(self):
-        res = self.export_valtxt(self.currentText())
+        """ Return selected item """
+        res = self.export_valtxt(self.cbox.currentText())
         return res
     
     def update_param(self, val):
+        """ Update parameter item """
         txt = self.get_valtxt(val)
-        self.blockSignals(True)
-        self.setCurrentText(txt)
-        self.blockSignals(False)
+        self.cbox.blockSignals(True)
+        self.cbox.setCurrentText(txt)
+        self.cbox.blockSignals(False)
+    
+    def set_warning(self, x, qitem=None, tooltip='Potential input error.'):
+        """ Show warning icon outside menu area """
+        super().set_warning(x, qitem=self.cbox, tooltip=tooltip)
+        self.cbox.qact.setVisible(x)
 
 
 class ParamObject(QtWidgets.QWidget):
     """ QWidget containing input widgets for all or a subset of parameters """
     
     update_signal = QtCore.pyqtSignal(dict, list)
+    warning_update_signal = QtCore.pyqtSignal(int, dict)
     
     def __init__(self, params={}, mode='all', parent=None):
         """
@@ -439,7 +692,6 @@ class ParamObject(QtWidgets.QWidget):
         self.gen_layout()
         self.init_widgets()
         self.set_mode(mode)
-        
         self.update_gui_from_ddict(params)
         self.connect_signals()
         
@@ -452,117 +704,62 @@ class ParamObject(QtWidgets.QWidget):
         ####################
         
         ### signal_processing
-        self.lfp_fs = Spinbox(key='lfp_fs')
-        self.lfp_fs.setDecimals(1)
-        self.lfp_fs.setSingleStep(0.5)
-        self.lfp_fs.setSuffix(' Hz')
-        self.trange = SpinboxRange(key='trange', double=True, decimals=0, 
-                                   maximum=999999, suffix=' s')
-        self.trange.box1.setMinimum(-1)
-        kwargs = dict(double=True, decimals=1, step=0.5, maximum=999999, suffix=' Hz')
-        self.theta = SpinboxRange(key='theta', **kwargs)
-        self.slow_gamma = SpinboxRange(key='slow_gamma', **kwargs)
-        self.fast_gamma = SpinboxRange(key='fast_gamma', **kwargs)
-        self.ds_freq = SpinboxRange(key='ds_freq', **kwargs)
-        self.swr_freq = SpinboxRange(key='swr_freq', **kwargs)
+        self.lfp_fs = SpinboxLfpFS(key='lfp_fs', minimum=1, decimals=1, 
+                                   step=0.5, suffix=' Hz')
+        self.trange = SpinboxTimeRange(key='trange', double=True, decimals=0,
+                                       minimum=-999999, maximum=999999, 
+                                       suffix=' s', min_separation=1)
+        kwargs = dict(double=True, decimals=1, step=0.5, maximum=999999, 
+                      suffix=' Hz', min_separation=0.5)
+        self.theta = SpinboxFreqRange(key='theta', **kwargs)
+        self.slow_gamma = SpinboxFreqRange(key='slow_gamma', **kwargs)
+        self.fast_gamma = SpinboxFreqRange(key='fast_gamma', **kwargs)
+        self.ds_freq = SpinboxFreqRange(key='ds_freq', **kwargs)
+        self.swr_freq = SpinboxFreqRange(key='swr_freq', **kwargs)
         ### ds_detection
-        self.ds_height_thr = Spinbox(key='ds_height_thr')
-        self.ds_height_thr.setSuffix(' S.D.')
-        self.ds_dist_thr = Spinbox(key='ds_dist_thr')
-        self.ds_dist_thr.setSuffix(' ms')
-        self.ds_dist_thr.setDecimals(0)
-        self.ds_prom_thr = Spinbox(key='ds_prom_thr')
-        self.ds_prom_thr.setSuffix(' a.u.')
-        self.ds_wlen = Spinbox(key='ds_wlen')
-        self.ds_wlen.setSuffix(' ms')
-        self.ds_wlen.setDecimals(0)
+        self.ds_height_thr = Spinbox(key='ds_height_thr', suffix=' S.D.')
+        self.ds_abs_thr = Spinbox(key='ds_abs_thr', suffix=' mV')
+        self.ds_dist_thr = Spinbox(key='ds_dist_thr', suffix=' ms', decimals=0)
+        self.ds_prom_thr = Spinbox(key='ds_prom_thr', suffix=' a.u.')
+        self.ds_wlen = Spinbox(key='ds_wlen', suffix=' ms', decimals=0)
         ### swr_detection
-        self.swr_ch_bound = Spinbox(key='swr_ch_bound')
-        self.swr_ch_bound.setSuffix(' channels')
-        self.swr_ch_bound.setDecimals(0)
-        self.swr_height_thr = Spinbox(key='swr_height_thr')
-        self.swr_height_thr.setSuffix(' S.D.')
-        self.swr_min_thr = Spinbox(key='swr_min_thr')
-        self.swr_min_thr.setSuffix(' S.D.')
-        self.swr_dist_thr = Spinbox(key='swr_dist_thr')
-        self.swr_dist_thr.setSuffix(' ms')
-        self.swr_dist_thr.setDecimals(0)
-        self.swr_min_dur = Spinbox(key='swr_min_dur')
-        self.swr_min_dur.setSuffix(' ms')
-        self.swr_min_dur.setDecimals(0)
-        self.swr_freq_thr = Spinbox(key='swr_freq_thr')
-        self.swr_freq_thr.setDecimals(1)
-        self.swr_freq_thr.setSuffix(' Hz')
-        self.swr_freq_win = Spinbox(key='swr_freq_win')
-        self.swr_freq_win.setSuffix(' ms')
-        self.swr_freq_win.setDecimals(0)
-        self.swr_maxamp_win = Spinbox(key='swr_maxamp_win')
-        self.swr_maxamp_win.setSuffix(' ms')
-        self.swr_maxamp_win.setDecimals(0)
+        self.swr_ch_bound = Spinbox(key='swr_ch_bound', suffix=' channels', decimals=0)
+        self.swr_height_thr = Spinbox(key='swr_height_thr', suffix=' S.D.')
+        self.swr_min_thr = Spinbox(key='swr_min_thr', suffix=' S.D.')
+        self.swr_dist_thr = Spinbox(key='swr_dist_thr', suffix=' ms', decimals=0)
+        self.swr_min_dur = Spinbox(key='swr_min_dur', suffix=' ms', decimals=0)
+        self.swr_freq_thr = Spinbox(key='swr_freq_thr', suffix=' Hz', decimals=1)
+        self.swr_freq_win = Spinbox(key='swr_freq_win', suffix=' ms', decimals=0)
+        self.swr_maxamp_win = Spinbox(key='swr_maxamp_win', suffix=' ms', decimals=0)
         ### csd_calculation
-        self.csd_method = Combobox(key='csd_method')
-        self.csd_method.addItems(['Standard','Delta','Step','Spline'])
-        self.f_type = Combobox(key='f_type')
-        self.f_type.addItems(['Gaussian','Identity','Boxcar','Hamming','Triangular'])
-        self.f_order = Spinbox(key='f_order')
-        self.f_order.setMinimum(1)
-        self.f_order.setDecimals(1)
-        self.f_sigma = Spinbox(key='f_sigma')
-        self.f_sigma.setDecimals(1)
-        self.f_sigma.setSingleStep(0.1)
-        self.vaknin_el = Combobox(key='vaknin_el')
-        self.vaknin_el.addItems(['True','False'])
-        self.tol = Spinbox(key='tol')
-        self.tol.setDecimals(7)
-        self.tol.setSingleStep(0.0000001)
-        self.spline_nsteps = Spinbox(key='spline_nsteps')
-        self.spline_nsteps.setMaximum(2500)
-        self.spline_nsteps.setDecimals(0)
-        self.src_diam = Spinbox(key='src_diam')
-        self.src_diam.setDecimals(3)
-        self.src_diam.setSingleStep(0.01)
-        self.src_diam.setSuffix(' mm')
-        self.src_h = Spinbox(key='src_h')
-        self.src_h.setDecimals(3)
-        self.src_h.setSingleStep(0.01)
-        self.src_h.setSuffix(' mm')
-        self.cond = Spinbox(key='cond')
-        self.cond.setDecimals(3)
-        self.cond.setSingleStep(0.01)
-        self.cond.setSuffix(' S/m')
-        self.cond_top = Spinbox(key='cond_top')
-        self.cond_top.setDecimals(3)
-        self.cond_top.setSingleStep(0.01)
-        self.cond_top.setSuffix(' S/m')
+        self.csd_method = Combobox(key='csd_method',
+                                   items=['Standard','Delta','Step','Spline'])
+        self.f_type = Combobox(key='f_type', items=['Gaussian','Identity','Boxcar',
+                                                    'Hamming','Triangular'])
+        self.f_order = Spinbox(key='f_order', minimum=1, decimals=1)
+        self.f_sigma = Spinbox(key='f_sigma', decimals=1, step=0.1)
+        self.vaknin_el = Combobox(key='vaknin_el', items=['True','False'])
+        self.tol = Spinbox(key='tol', decimals=7, step=0.0000001)
+        self.spline_nsteps = Spinbox(key='spline_nsteps', maximum=2500, decimals=0)
+        self.src_diam = Spinbox(key='src_diam', suffix=' mm', decimals=3, step=0.01)
+        self.src_h = Spinbox(key='src_h', suffix=' mm', decimals=3, step=0.01)
+        self.cond = Spinbox(key='cond', suffix=' S/m', decimals=3, step=0.01)
+        self.cond_top = Spinbox(key='cond_top', suffix=' S/m', decimals=3, step=0.01)
         ### csd_clustering
-        self.clus_algo = Combobox(key='clus_algo')
-        self.clus_algo.addItems(['K-means','DBSCAN'])
-        self.nclusters = Spinbox(key='nclusters')
-        self.nclusters.setMinimum(1)
-        self.nclusters.setSuffix(' clusters')
-        self.nclusters.setDecimals(0)
-        self.eps = Spinbox(key='eps')
-        self.eps.setDecimals(2)
-        self.eps.setSingleStep(0.1)
-        self.eps.setSuffix(' a.u.')
-        self.min_clus_samples = Spinbox(key='min_clus_samples')
-        self.min_clus_samples.setMinimum(1)
-        self.min_clus_samples.setDecimals(0)
+        self.clus_algo = Combobox(key='clus_algo', items=['K-means','DBSCAN'])
+        self.nclusters = Spinbox(key='nclusters', suffix=' clusters', minimum=1, decimals=0)
+        self.eps = Spinbox(key='eps', suffix=' a.u.', decimals=2, step=0.1)
+        self.min_clus_samples = Spinbox(key='min_clus_samples', minimum=1, decimals=0)
         ### probe_geometry
-        self.el_shape = Combobox(key='el_shape')
-        self.el_shape.addItems(['Circle', 'Square', 'Rectangle'])
-        self.el_area = Spinbox(key='el_area')
-        self.el_area.setDecimals(1)
-        self.el_area.setSuffix(' \u00B5m\u00B2')
-        self.el_h = Spinbox(key='el_h')
-        self.el_h.setDecimals(1)
-        self.el_h.setSuffix(' \u00B5m')
-        for sbox in [self.lfp_fs, self.ds_height_thr, self.ds_dist_thr, self.ds_prom_thr, self.ds_wlen, 
-                     self.swr_ch_bound, self.swr_height_thr, self.swr_min_thr, self.swr_dist_thr, 
+        self.el_shape = Combobox(key='el_shape', items=['Circle', 'Square', 'Rectangle'])
+        self.el_area = Spinbox(key='el_area', suffix=' \u00B5m\u00B2', decimals=1)
+        self.el_h = Spinbox(key='el_h', suffix=' \u00B5m', decimals=1)
+        for sbox in [self.lfp_fs, self.ds_height_thr, self.ds_abs_thr, self.ds_dist_thr, self.ds_prom_thr, 
+                     self.ds_wlen, self.swr_ch_bound, self.swr_height_thr, self.swr_min_thr, self.swr_dist_thr, 
                      self.swr_min_dur, self.swr_freq_thr, self.swr_freq_win, self.swr_maxamp_win,
                      self.f_order, self.f_sigma, self.tol, self.src_diam, self.src_h, self.cond,
                      self.cond_top, self.nclusters, self.eps, self.min_clus_samples, self.el_area, self.el_h]:
-            sbox.setMaximum(999999)
+            sbox.box.setMaximum(999999)
         # organize widgets by analysis step
         tups = [(self.lfp_fs, 'signal_processing'),
                 (self.trange, 'signal_processing'),
@@ -573,6 +770,7 @@ class ParamObject(QtWidgets.QWidget):
                 (self.swr_freq, 'signal_processing'),
                 
                 (self.ds_height_thr, 'ds_detection'),
+                (self.ds_abs_thr, 'ds_detection'),
                 (self.ds_dist_thr, 'ds_detection'),
                 (self.ds_prom_thr, 'ds_detection'),
                 (self.ds_wlen, 'ds_detection'),
@@ -636,6 +834,7 @@ class ParamObject(QtWidgets.QWidget):
             # create row widget, add to layout
             row = QtWidgets.QWidget()
             hbox = QtWidgets.QHBoxLayout(row)
+            hbox.setSpacing(1)
             hbox.setContentsMargins(0,0,0,0)
             hbox.addWidget(qlabel, stretch=0)
             hbox.addWidget(widget, stretch=1)
@@ -647,7 +846,30 @@ class ParamObject(QtWidgets.QWidget):
         """ Connect GUI inputs """
         for widget in self.WIDGETS.values():
             widget.param_changed_signal.connect(self.emit_signal)
-            
+            widget.param_warning_signal.connect(self.handle_warnings)
+        
+        for fbk in ['theta', 'slow_gamma', 'fast_gamma', 'ds_freq', 'swr_freq']:
+            self.lfp_fs.box.valueChanged.connect(self.WIDGETS[fbk].set_lfp_fs)
+    
+    def handle_warnings(self):
+        """ Pass parameter input warnings to main window """
+        warn_dict = self.get_warn_dict()
+        n = sum([*map(lambda l: sum(l)>0, warn_dict.values())])
+        self.warning_update_signal.emit(n, warn_dict)
+        
+    def get_warn_dict(self):
+        """ Return warning status for each input widget """
+        ddict = {}
+        for k in self.KEYS:
+            item = self.WIDGETS[k]
+            if isinstance(item, Spinbox):
+                ddict[k] = [bool(item.box.warning)]
+            elif isinstance(item, SpinboxRange):
+                ddict[k] = [bool(item.box0.warning), bool(item.box1.warning)]
+            elif isinstance(item, Combobox):
+                ddict[k] = [bool(item.cbox.warning)]
+        return ddict
+        
     def ddict_from_gui(self):
         """ Return GUI widget values as parameter dictionary """
         ddict = {}
@@ -670,10 +892,11 @@ class ParamObject(QtWidgets.QWidget):
         param_dict = {k:ddict[k] if x else self.DEFAULTS[k] for k,x in valid_ddict.items()}
         for key,val in param_dict.items():
             item = self.WIDGETS[key]
-            #if block: item.blockSignals(True)
             item.update_param(val)
             item.set_widget_valid(valid_ddict[key])
-            #if block: item.blockSignals(False)
+        for fbk in ['theta', 'slow_gamma', 'fast_gamma', 'ds_freq', 'swr_freq']:
+            self.WIDGETS[fbk].set_lfp_fs(self.lfp_fs.box.value())
+        
     
     def emit_signal(self, *args):
         """ Emit current parameter dictionary and validity of each value """
@@ -709,3 +932,19 @@ class ParamObject(QtWidgets.QWidget):
         for item,val in map(func, self.WIDGETS.items()):
             item.update_param(val)
             item.set_widget_valid(True)
+
+
+class ParameterScroll(QtWidgets.QScrollArea):
+    """ Embed main parameter interface inside scroll area """
+    def __init__(self, params={}, mode='all', parent=None):
+        super().__init__(parent=parent)
+        self.main_widget = ParamObject(params, mode=mode)
+        inner_widget = pyfx.get_widget_container('v', self.main_widget, 
+                                                 cm=None, widget='widget')
+        self.horizontalScrollBar().hide()
+        self.setWidgetResizable(True)
+        self.setWidget(inner_widget)
+        
+        
+            
+            
