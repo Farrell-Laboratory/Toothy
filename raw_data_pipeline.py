@@ -246,17 +246,15 @@ class DataWorker(QtCore.QObject):
         
         for iprb,probe in enumerate(probe_group.probes):
             hdr = f'ANALYZING PROBE {iprb+1} / {nprobes}<br>'
-            LFP_dict = ff[str(iprb)]['LFP']
-            LFP_raw = LFP_dict['raw']; NCH = len(LFP_raw)
             shank_ids = np.array(probe.shank_ids, dtype='int')
+            LFP_raw = ff[str(iprb)]['LFP']['raw']; NCH = len(LFP_raw)
             # bandpass filter signals and get mean channel amplitudes
-            for k in ['theta', 'slow_gamma', 'fast_gamma', 'swr', 'ds']:
-                #del LFP_dict[k]
-                LFP_dict.create_dataset(k, (NCH, NSAMPLES_DN_TRUNC), dtype='float32')
+            LFP_dict = {}
+            for k in ['theta', 'slow_gamma', 'fast_gamma', 'ds', 'swr']:
+                LFP_dict[k] = np.ones(LFP_raw.shape, dtype='float32')
                 
             self.progress_signal.emit(hdr + '<br>Bandpass filtering signals ...')
             KW2 = {'lfp_fs':lfp_fs, 'axis':1}
-            
             try:
                 arr_list = np.array_split(LFP_raw, int(np.ceil(NSAMPLES_DN_TRUNC / ichunk)), axis=1)
                 p = 0
@@ -275,11 +273,10 @@ class DataWorker(QtCore.QObject):
             except Exception as e:
                 self.quit_thread(f'Filtering Error: {str(e)}', ff=ff)
                 return
+            ff[str(iprb)]['LFP']['ds'] = np.array(LFP_dict['ds'])
+            ff[str(iprb)]['LFP']['swr'] = np.array(LFP_dict['swr'])
             STD = pd.DataFrame(std_dict)
             STD.to_hdf(ff.filename, key=f'/{iprb}/STD')
-            del ff[str(iprb)]['LFP']['theta']
-            del ff[str(iprb)]['LFP']['slow_gamma']
-            del ff[str(iprb)]['LFP']['fast_gamma']
             
             
             ####################################
