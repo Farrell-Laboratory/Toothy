@@ -277,6 +277,9 @@ class DataWorker(QtCore.QObject):
                 return
             STD = pd.DataFrame(std_dict)
             STD.to_hdf(ff.filename, key=f'/{iprb}/STD')
+            del ff[str(iprb)]['LFP']['theta']
+            del ff[str(iprb)]['LFP']['slow_gamma']
+            del ff[str(iprb)]['LFP']['fast_gamma']
             
             
             ####################################
