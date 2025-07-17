@@ -15,6 +15,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+from matplotlib.ticker import FuncFormatter
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import seaborn as sns
 from copy import deepcopy
@@ -155,6 +156,11 @@ class IFigLFP(QtWidgets.QWidget):
         self.fig = matplotlib.figure.Figure(constrained_layout=True)
         self.ax = self.fig.add_subplot()
         self.ax.sharey(fax0)
+        self.xfmts = {'S':FuncFormatter(lambda x,pos: f'{x:.2f}'),
+                      'M':FuncFormatter(lambda x,pos: f'{x/60:.2f}'),
+                      'H':FuncFormatter(lambda x,pos: f'{x/3600:.2f}')}
+        self.xax_formatter = self.xfmts['S']  # initialize x-units as seconds
+        self.xu = 's'
     
     def connect_mpl_widgets(self):
         """ Connect keyboard/mouse inputs """
@@ -419,6 +425,13 @@ class IFigLFP(QtWidgets.QWidget):
                                                           pyfx.Edges(yax), csd, cmap=plt.get_cmap('bwr'))
                     self.span.set_visible(False)
                     self.canvas.draw_idle()
+            elif event.key in ['S','M','H']:
+                self.xax_formatter = self.xfmts[event.key]
+                self.xu = event.key.lower()
+                self.ax.xaxis.set_major_formatter(self.xax_formatter)
+                self.ax.set_xlabel(f'Time ({self.xu})')
+                self.canvas.draw_idle()
+                
         self.cid = self.canvas.mpl_connect("key_press_event", on_press)
         self.cid2 = self.canvas.mpl_connect("button_press_event", on_click)
         
@@ -641,15 +654,17 @@ class IFigLFP(QtWidgets.QWidget):
                 swr_rm_times = x[np.where(self.SWR_train[idx] < 0)[0]]
                 for swrrt in swr_rm_times:
                     self.ax.axvline(swrrt, color='green', ls='--', zorder=-5, alpha=0.4)
-        self.ax.set(xlabel='Time (s)', ylabel='channel index')
-        self.ax.set_xmargin(0.01)
-        self.ax.set_ymargin(0.01)
         
         if self.canvas_freq.isVisible():
             self.plot_freq_band_pwr()
-        
+            
         yticks = -np.array(self.shank_channels)
         _ = self.ax.set_yticks(yticks, labels=np.int16(abs(yticks)).astype('str'))
+        # set x-axis with appropriate units
+        self.ax.xaxis.set_major_formatter(self.xax_formatter)
+        self.ax.set(xlabel=f'Time ({self.xu})', ylabel='channel index')
+        self.ax.set_xmargin(0.01)
+        self.ax.set_ymargin(0.01)
         self.canvas.draw_idle()
         
     def closeEvent(self, event):
