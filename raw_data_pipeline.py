@@ -41,7 +41,7 @@ import resources_rc
 class ArrayReader(QtCore.QObject):
     """ Reads data arrays from NPY and MAT files """
     progress_signal = QtCore.pyqtSignal(str)
-    data_signal = QtCore.pyqtSignal(str, np.ndarray, dict)
+    data_signal = QtCore.pyqtSignal(str, dict, dict)
     error_signal = QtCore.pyqtSignal(str, str)
     finished = QtCore.pyqtSignal()
     
@@ -63,20 +63,24 @@ class ArrayReader(QtCore.QObject):
             elif ext == '.mat': # load MAT file
                 file_data = so.loadmat(fpath, squeeze_me=True)
             if isinstance(file_data, np.ndarray): # data saved as ndarray
-                data_array = np.array(file_data)
                 meta = {'fs':None, 'units':None}
+                data_dict = {}
+                if file_data.ndim == 2:
+                    data_dict['data'] = np.array(file_data)
+                else:  # data array not 2-dimensional
+                    error_msg = 'Error: Data must be a 2-dimensional array.'
             elif isinstance(file_data, dict):     # data saved as dictionary
                 self.progress_signal.emit('Parsing data dictionary ...')
                 try:  # get data array (required) and SR/unit metadata (optional)
-                    data_array, meta = dp.read_data_from_dict(file_data)
+                    data_dict, meta = dp.read_data_from_dict(file_data)
+                    if len(data_dict) == 0:
+                        error_msg = f'Error: No 2-dimensional data arrays found in "{fname}".'
                 except: error_msg = f'Error: Could not parse data from "{fname}".'
             else: error_msg = 'Error: File must contain data array or dictionary.'
         except: error_msg = f'Error: Unable to load "{fname}".'
-        if error_msg == '' and data_array.ndim != 2: # data array not 2-dimensional
-            error_msg = 'Error: Data must be a 2-dimensional array.'
         # return data or error message
         if error_msg == '':
-            self.data_signal.emit(str(fpath), data_array, meta)
+            self.data_signal.emit(str(fpath), data_dict, meta)
             self.progress_signal.emit('Done!')
         else:
             self.error_signal.emit(str(fpath), error_msg)
@@ -87,26 +91,25 @@ class ExtractorWorker(QtCore.QObject):
     """ Returns spikeinterface extractor objects for raw recordings """
     progress_signal = QtCore.pyqtSignal(str)
     data_signal = QtCore.pyqtSignal(object)
-    error_signal = QtCore.pyqtSignal(str)
+    error_signal = QtCore.pyqtSignal(str, str)
     finished = QtCore.pyqtSignal()
     
-    def __init__(self, fpath, data_array=None, metadata={}):
+    def __init__(self, fpath, **kwargs):
         """ Initialize recording filepath and raw data (if previously loaded) """
         super().__init__()
         self.fpath = fpath
-        self.data_array = data_array
-        self.metadata = metadata
+        self.kwargs = {'data_array' : kwargs.get('data_array'),
+                       'metadata' : kwargs.get('metadata', {}),
+                       'electrical_series_path' : kwargs.get('electrical_series_path')}
     
     def run(self):
         """ Get recording extractor """
-        fpath, data_array, metadata = self.fpath, self.data_array, self.metadata
-        data_type = dp.get_data_format(fpath)
+        data_type = dp.get_data_format(self.fpath)
         self.progress_signal.emit(f'Getting {data_type} extractor ...')
         try:  # get spikeinterface extractor for selected data type
-            recording = dp.get_extractor(fpath, data_type, data_array=data_array,
-                                         metadata=metadata)
-        except: # failed to load extractor object
-            self.error_signal.emit(f'Error: Unable to load {data_type} extractor.')
+            recording = dp.get_extractor(self.fpath, data_type, **self.kwargs)
+        except Exception as e: # failed to load extractor object
+            self.error_signal.emit(str(self.fpath), f'Error: {str(e)}')
         else:   # emit valid extractor
             self.data_signal.emit(recording)
             self.progress_signal.emit('Done!')
@@ -372,21 +375,6 @@ class RawRecordingSelectionWidget(gi.FileSelectionWidget):
         self.le.setText(ppath)
         self.update_status(x)
         self.signal.emit(self.VALID_PPATH)
-        
-    def read_data_array(self, ppath):
-        """ Load NPY/MAT data locally (not implemented) """
-        try:
-            data_array, meta = dp.read_array_file(ppath, raise_exception=True)
-            if data_array.ndim != 2: # data array not 2-dimensional
-                gi.MsgboxError('Error: Data must be a 2-dimensional array.').exec()
-                self.update_filepath(ppath, False)
-                return
-        except Exception as e: # failed to load data file
-            gi.MsgboxError(f'Error: {str(e)}').exec()
-            self.update_filepath(ppath, False)
-            return
-        # pass valid data array and initial metadata to pop-up window
-        self.enter_array_metadata(ppath, data_array, meta)
     
     def enter_array_metadata(self, ppath, data_array, meta):
         """ Prompt user to enter contextual metadata for NPY/MAT files """
@@ -510,8 +498,8 @@ class ProbeAssignmentWidget(QtWidgets.QWidget):
         
         self.gen_layout()
         self.connect_signals()
-        self.pipeline_btn = QtWidgets.QPushButton('PROCESS DATA')
-        self.pipeline_btn.setEnabled(False)
+        self.probe_done_btn = QtWidgets.QPushButton('i have written new text') # PROCESS DATA
+        self.probe_done_btn.setEnabled(False)
     
     def gen_layout(self):
         """ Set up layout """
@@ -629,7 +617,7 @@ class ProbeAssignmentWidget(QtWidgets.QWidget):
             assert nch <= len(self.remaining_rows)
         except AssertionError:
             msg = f'Cannot map {nch}-channel probe to {len(self.remaining_rows)} remaining data rows'
-            gi.MsgboxError(msg).exec()
+            gi.MsgboxError(msg, parent=self).exec()
             return
         
         if self.MODE == 1:
@@ -638,7 +626,7 @@ class ProbeAssignmentWidget(QtWidgets.QWidget):
                 assert len(np.unique(lens)) < 2  # alternate indexing requires all same-size probes
             except AssertionError:
                 msg = 'Alternate indexing requires all probes to be the same size'
-                gi.MsgboxError(msg).exec()
+                gi.MsgboxError(msg, parent=self).exec()
                 return
         # get start row for probe based on prior probe assignment
         start_row = 0
@@ -726,7 +714,7 @@ class ProbeAssignmentWidget(QtWidgets.QWidget):
         probe_strings = [', '.join(np.array(x, dtype=str)) for x in ALL_ROWS.values()]
         self.data_assign_df = pd.DataFrame({'Row':ALL_ROWS.keys(), # assignment dataframe
                                             'Probe(s)':probe_strings})
-        self.pipeline_btn.setEnabled(is_valid)  # require valid config for next step
+        self.probe_done_btn.setEnabled(is_valid)  # require valid config for next step
         self.data_lbl.setText(self.data_txt_fmt % (['red','green'][int(is_valid)], nvalid))
         self.check_signal.emit()
         
@@ -752,15 +740,21 @@ class RawArrayPopup(QtWidgets.QDialog):
         else: # rows == channels
             self.nch, self.nts = data_shape
             row_lbl, col_lbl = ['channels', 'samples']
-        _ = f'{nrows} {row_lbl} x {ncols} {col_lbl}'
+        txt = f'<code>{nrows} {row_lbl} x {ncols} {col_lbl}</code>'
+        qlbl = QtWidgets.QLabel(txt)
+        qlbl.setStyleSheet('QLabel {background-color : white; padding : 4px;}')
+        qtitle = QtWidgets.QLabel('Data dimensions:')
+        self.lbl_row = pyfx.get_widget_container('h', qtitle, qlbl, stretch_factors=[2,0],
+                                                 widget='widget')
         # create sampling rate and unit inputs
         self.fs_w = gi.LabeledSpinbox('Sampling rate', double=True, minimum=1, 
                                       maximum=9999999999, suffix=' Hz')
-        if fs is not None:
-            self.fs_w.setValue(fs)
         self.dur_w = gi.LabeledSpinbox('Duration', double=True, minimum=0.0001,
                                        maximum=9999999999, suffix=' s', decimals=4)
         self.dur_w.qw.setReadOnly(True)
+        if fs is not None:
+            self.fs_w.setValue(fs)
+            self.dur_w.setValue(self.nts / fs)
         self.units_w = gi.LabeledCombobox('Units')
         self.units_w.addItems(self.supported_units)
         if units in self.supported_units:
@@ -777,6 +771,8 @@ class RawArrayPopup(QtWidgets.QDialog):
         bbox_lay.addWidget(self.close_btn)
         bbox_lay.addWidget(self.confirm_meta_btn)
         
+        self.layout.addWidget(self.lbl_row)
+        self.layout.addWidget(pyfx.DividerLine(lw=1, mlw=1))
         self.layout.addLayout(hlay)
         self.layout.addWidget(self.bbox)
     
@@ -829,6 +825,7 @@ class RawRecordingSelectionPopup(QtWidgets.QDialog):
         self.fsw.update_filepath(init_ppath)
         self.probe_gbox.hide()
         self.save_gbox.hide()
+        QtCore.QTimer.singleShot(10, lambda: self.ddir_gbox.setFixedHeight(self.ddir_gbox.height()))
         
     def gen_layout(self):
         """ Set up layout """
@@ -838,6 +835,7 @@ class RawRecordingSelectionPopup(QtWidgets.QDialog):
         #self.layout.setSizeConstraint(QtWidgets.QLayout.SetFixedSize)
         
         ### raw recording selection
+        self.ddir_container = QtWidgets.QSplitter()
         self.ddir_gbox = QtWidgets.QGroupBox()
         self.ddir_gbox.setStyleSheet(gbox_ss)
         ddir_vbox = pyfx.InterWidgets(self.ddir_gbox, 'v')[2]
@@ -860,6 +858,13 @@ class RawRecordingSelectionPopup(QtWidgets.QDialog):
             self.radio_btns[k] = btn
             mygrid.addWidget(btn, *i2rc(i))
         self.fsw.vlay.addLayout(mygrid)
+        # raw recording metadata display
+        self.meta_qform = gi.RawMeta()
+        meta_qscroll = pyfx.get_widget_container('v', self.meta_qform, widget='scroll')
+        self.meta_gbox = pyfx.get_widget_container('v', meta_qscroll, widget='groupbox')
+        self.ddir_container.addWidget(self.ddir_gbox)
+        self.ddir_container.addWidget(self.meta_gbox)
+        self.meta_gbox.hide()
         
         ### results directory location
         save_lbl = QtWidgets.QLabel('<u>Results Dir.</u>')
@@ -905,18 +910,30 @@ class RawRecordingSelectionPopup(QtWidgets.QDialog):
         self.base_folder_btn = QtWidgets.QPushButton('Set base folders ... ')
         self.base_folder_btn.setAutoDefault(False)
         self.base_folder_btn.setFocusPolicy(QtCore.Qt.NoFocus)
+        # create button to display raw recording metadata
+        self.meta_btn = QtWidgets.QPushButton()
+        self.meta_btn.setCheckable(True)
+        self.meta_btn.setStyleSheet(pyfx.dict2ss(QSS.META_TOGGLE_BTN))
+        self.meta_btn.setFixedWidth(self.meta_btn.sizeHint().height())
+        self.meta_btn.hide()
         bbar = QtWidgets.QHBoxLayout()
         bbar.addWidget(self.params_warning_btn, stretch=0)
         bbar.addWidget(self.params_bar, stretch=2)
         bbar.addWidget(self.base_folder_btn, stretch=0)
+        bbar.addWidget(self.meta_btn, stretch=0)
         settings_vlay.addLayout(bbar)
-        settings_vlay.addWidget(self.qscroll)
+        
+        #self.settings_body = QtWidgets.QWidget()
+        self.settings_container = QtWidgets.QSplitter()
+        self.settings_container.addWidget(self.qscroll)
+        settings_vlay.addWidget(self.settings_container)
         
         ### probe assignment
         self.probe_gbox = QtWidgets.QGroupBox()
         self.probe_gbox.setStyleSheet('QGroupBox {border-width : 0px;'
                                       'font-weight : bold; text-decoration : underline;}')
         self.probe_vbox = pyfx.InterWidgets(self.probe_gbox, 'v')[2]
+        self.paw = None
         
         ### action buttons
         bbox = QtWidgets.QHBoxLayout()
@@ -933,7 +950,8 @@ class RawRecordingSelectionPopup(QtWidgets.QDialog):
         bbox.addWidget(self.probe_map_btn)
         bbox.addWidget(self.pipeline_btn)
         # set central layout
-        self.layout.addWidget(self.ddir_gbox)
+        #self.layout.addWidget(self.ddir_gbox)
+        self.layout.addWidget(self.ddir_container)
         self.layout.addWidget(self.settings_w)
         self.layout.addWidget(self.probe_gbox)
         self.layout.addWidget(self.save_gbox)
@@ -961,37 +979,8 @@ class RawRecordingSelectionPopup(QtWidgets.QDialog):
         self.back_btn.clicked.connect(self.back_to_selection)
         self.save_ddir_btn.clicked.connect(self.set_save_ddir)
         self.params_bar.toggled.connect(lambda x: self.qscroll.setVisible(x))
-        self.params_bar.toggled.connect(lambda x: self.params_warning_btn.setChecked(x))
         self.base_folder_btn.clicked.connect(self.base_folder_popup)
-    
-    def update_param_warnings(self, n, ddict):
-        """ Show warning button if 1+ parameter widgets are flagged """
-        self.params_warning_btn.setVisible(n > 0)
-        
-    def update_probe_config(self):
-        """ If probe assignment is valid, enable processing step """
-        x = bool(self.paw.pipeline_btn.isEnabled())
-        self.paw.prb_icon_btn.new_status(x)
-        self.pipeline_btn.setEnabled(bool(x and self.PARAMS is not None))
-        
-    def assemble_probe_group(self):
-        """ Return ProbeGroup object from row items in probe assignment widget """
-        PROBE_GROUP = prif.ProbeGroup()
-        items = pyfx.layout_items(self.paw.qlayout)
-        for i,item in enumerate(items):
-            prb  = item.probe
-            rows = item.ROWS  # group of rows belonging to this probe
-            # reorder assigned rows by device indices
-            sorted_rows = [rows[dvi] for dvi in prb.device_channel_indices]
-            prb.set_contact_ids(rows)
-            # device_indices * nprobes + start_row = sorted_rows
-            prb.set_device_channel_indices(sorted_rows)
-            if i > 0:  # make sure probe boundaries do not overlap
-                xmax = max(PROBE_GROUP.probes[-1].contact_positions[:,0])
-                cur_xmin = min(prb.contact_positions[:,0])
-                prb.contact_positions[:,0] += (xmax - cur_xmin + 1)
-            PROBE_GROUP.add_probe(item.probe)
-        return PROBE_GROUP
+        self.meta_btn.toggled.connect(lambda x: self.meta_gbox.setVisible(x))
     
     def create_workers(self):
         """ Parallel thread for long-running processing steps """
@@ -1017,29 +1006,8 @@ class RawRecordingSelectionPopup(QtWidgets.QDialog):
         self.worker_object = None
         self.worker_thread = None
         
-    ### array reader
-        
-    def load_array_worker(self, ppath):
-        """ Worker loads raw data array into memory """
-        self.worker_object = ArrayReader(ppath)
-        self.worker_object.data_signal.connect(self.load_array_finished_slot)
-        self.worker_object.error_signal.connect(self.load_array_error_slot)
-        self.start_qthread()
-        
-    @QtCore.pyqtSlot(str, np.ndarray, dict)
-    def load_array_finished_slot(self, fpath, data_array, meta):
-        """ Worker returned valid data array and initial metadata """
-        # pass LFP array and metadata dictionary to widget
-        self.fsw.enter_array_metadata(fpath, data_array, meta)
-        
-    @QtCore.pyqtSlot(str, str)
-    def load_array_error_slot(self, ppath, error_msg):
-        """ Worker encountered an error while loading array """
-        gi.MsgboxError(error_msg).exec()
-        self.fsw.update_filepath(ppath, False)
-    
     def ppath_updated(self, x):
-        """ If raw data source is valid, enable probe assignment step """
+        """ Check if raw data source is valid """
         if x:
             ppath = self.fsw.le.text()
             data_type = dp.get_data_format(ppath)
@@ -1048,38 +1016,112 @@ class RawRecordingSelectionPopup(QtWidgets.QDialog):
         for k,btn in self.radio_btns.items():
             btn.setChecked(k==data_type)
         self.probe_map_btn.setEnabled(x)
+        self.meta_btn.setVisible(x)
         if x:
-            self.extractor_worker(ppath, data_type)
-    
+            self.extractor_worker(ppath, data_type) # load new recording
+        else:
+            self.recording = None # delete previous recording (if any)
+            self.params_widget.trange.set_duration(np.inf)
+            self.params_widget.lfp_fs.set_fs(None)
+            self.meta_qform.update_recording(None)
+            self.meta_btn.setChecked(False)
+        
+    ### array reader
+        
+    def load_array_worker(self, ppath):
+        """ Read raw data array into memory """
+        self.worker_object = ArrayReader(ppath)
+        self.worker_object.data_signal.connect(self.load_array_finished_slot)
+        self.worker_object.error_signal.connect(self.load_array_error_slot)
+        self.start_qthread()
+        
+    @QtCore.pyqtSlot(str, dict, dict)
+    def load_array_finished_slot(self, fpath, data_dict, meta):
+        """ Pass valid array and initial metadata to the user """
+        if len(data_dict) > 1:  # file contains multiple 2-dimensional datasets
+            lbl = '<u>Select LFP dataset</u>'
+            dlg = gi.ButtonPopup(*data_dict.keys(), label=lbl, parent=self)
+            for b in dlg.btns:
+                nrows, ncols = data_dict[b.text()].shape
+                b.setToolTip(f'{nrows} rows x {ncols} columns')
+            if dlg.exec(): # user selected LFP dataset key
+                data_array = data_dict[dlg.result]
+            else: # user closed dataset selection window
+                gi.MsgboxError('Aborted LFP dataset selection.', parent=self).exec()
+                return
+        else: # file contains only one 2-dimensional dataset
+            data_array = list(data_dict.values())[0]
+        # manually confirm sampling rate, units, etc
+        self.fsw.enter_array_metadata(fpath, data_array, meta)
+        
+    @QtCore.pyqtSlot(str, str)
+    def load_array_error_slot(self, ppath, error_msg):
+        """ Handle invalid NPY/MAT files """
+        gi.MsgboxError(error_msg, parent=self).exec()
+        self.fsw.update_filepath(ppath, False)
+        
+    def get_nwb_dataset(self, ppath):
+        """ Identify target ephys dataset in NWB file """
+        try:  # try getting names of available ElectricalSeries in NWB file
+            eseries = dp.get_nwb_eseries(ppath)
+        except Exception as e:  # file missing or corrupted
+            gi.MsgboxError(f'Error: {str(e)}', parent=self).exec()
+            return False
+        if len(eseries) == 0:   # no analyzable data
+            gi.MsgboxError('NWB file contains no ElectricalSeries '
+                           'with valid electrodes.', parent=self).exec()
+            return False
+        elif len(eseries) == 1: # return the only available dataset
+            return eseries[0]
+        elif len(eseries) > 1:  # ask user to select a target dataset
+            lbl = '<u>Select an ElectricalSeries dataset</u>'
+            dlg = gi.ButtonPopup(*eseries, label=lbl, parent=self)
+            if dlg.exec():
+                return str(dlg.result)
+            else:
+                gi.MsgboxError('Aborted NWB dataset selection.', parent=self).exec()
+                return False
+            
     def extractor_worker(self, ppath, data_type):
-        """ Worker instantiates a spikeinterface Extractor for a raw recording """
+        """ Instantiate spikeinterface Extractor for raw recording """
         data_array, metadata = None, {}
         if data_type in ['NPY','MAT']:  # create recording from loaded data/metadata
             data_array, metadata = self.fsw.data_array, self.fsw.meta
             if data_array.shape[0] == metadata['nch']:
                 data_array = data_array.T  # rows=samples, columns=channels
-                
+        electrical_series_path = None
+        if data_type == 'NWB':
+            es_name = self.get_nwb_dataset(ppath)
+            if es_name == False:
+                self.fsw.update_filepath(ppath, False)
+                return
+            electrical_series_path = f'acquisition/{es_name}'
+        KW = dict(data_array=data_array, metadata=metadata, 
+                  electrical_series_path=electrical_series_path)
         # create extractor worker
-        self.worker_object = ExtractorWorker(ppath, data_array, metadata)
+        self.worker_object = ExtractorWorker(ppath, **KW)
         self.worker_object.data_signal.connect(self.extractor_finished_slot)
         self.worker_object.error_signal.connect(self.extractor_error_slot)
         self.start_qthread()
     
     @QtCore.pyqtSlot(object)
     def extractor_finished_slot(self, recording):
-        """ Worker returned valid extractor object """
+        """ Load recording data into pipeline """
         self.recording = recording
         META = dp.get_meta_from_recording(self.recording)
         # update parameter widgets with loaded recording
         self.params_widget.lfp_fs.set_fs(float(META['fs']))
         self.params_widget.trange.set_duration(self.recording.get_duration())
+        self.meta_qform.update_recording(self.recording)
     
-    @QtCore.pyqtSlot(str)
-    def extractor_error_slot(self, error_msg):
-        """ Worker encountered an error while extracting recording """
-        gi.MsgboxError(error_msg).exec()
+    @QtCore.pyqtSlot(str, str)
+    def extractor_error_slot(self, ppath, error_msg):
+        """ Handle data extraction errors """
+        gi.MsgboxError(error_msg, parent=self).exec()
+        self.fsw.update_filepath(ppath, False)
         
     def start_probe_assignment(self):
+        """ Initiate probe mapping phase """
         NCH = self.recording.get_num_channels()
         # initialize probe box
         self.paw = ProbeAssignmentWidget(NCH)
@@ -1104,11 +1146,49 @@ class RawRecordingSelectionPopup(QtWidgets.QDialog):
         self.ddir_gbox.setEnabled(False)
         self.setWindowTitle('Map to probe(s)')
         pyfx.center_window(self)
+        
+    def assemble_probe_group(self):
+        """ Return ProbeGroup object from row items in probe assignment widget """
+        PROBE_GROUP = prif.ProbeGroup()
+        items = pyfx.layout_items(self.paw.qlayout)
+        for i,item in enumerate(items):
+            prb  = item.probe
+            rows = item.ROWS  # group of rows belonging to this probe
+            # reorder assigned rows by device indices
+            sorted_rows = [rows[dvi] for dvi in prb.device_channel_indices]
+            prb.set_contact_ids(rows)
+            # device_indices * nprobes + start_row = sorted_rows
+            prb.set_device_channel_indices(sorted_rows)
+            if i > 0:  # make sure probe boundaries do not overlap
+                xmax = max(PROBE_GROUP.probes[-1].contact_positions[:,0])
+                cur_xmin = min(prb.contact_positions[:,0])
+                prb.contact_positions[:,0] += (xmax - cur_xmin + 1)
+            PROBE_GROUP.add_probe(item.probe)
+        return PROBE_GROUP
+        
+    def update_probe_config(self):
+        """ Check for valid probe assignment """
+        x = bool(self.paw.probe_done_btn.isEnabled())
+        self.paw.prb_icon_btn.new_status(x)
+        self.enable_pipeline_btn()
+    
+    def update_param_warnings(self, n, ddict):
+        """ Check for any input parameter warnings """
+        x = n > 0
+        self.params_warning_btn.setChecked(x)
+        self.params_warning_btn.setVisible(x)
+        self.enable_pipeline_btn()
+    
+    def enable_pipeline_btn(self):
+        """ Enable processing pipeline """
+        a = self.paw is not None and self.paw.probe_done_btn.isEnabled()
+        b = not self.params_warning_btn.isChecked()
+        self.pipeline_btn.setEnabled(a and b)
     
     ### processing pipeline
     
     def pipeline_worker(self):
-        """ Worker starts the processing pipeline """
+        """ Run processing pipeline """
         META = dp.get_meta_from_recording(self.recording)
         # create probe group with all probe objects used in the recording
         self.PROBE_GROUP = self.assemble_probe_group()
@@ -1116,15 +1196,6 @@ class RawRecordingSelectionPopup(QtWidgets.QDialog):
         PARAMS = self.params_widget.DEFAULTS  # validated input params
         param_dict = self.params_widget.ddict_from_gui()[0]  # current data processing params
         PARAMS.update(param_dict)
-        
-        #pdb.set_trace()
-        # check that FS is evenly divisible by lfp_fs
-        # check that lfp_fs is high enough to filter by all freq bands
-        #     e.g. lfp_fs = 250, swr_freq = [120, 180]
-        #          Nyquist freq = 0.5 * lfp_fs = 125
-        #          Critical frequencies = freq_band/nyq = [120/125, 180/125] = [0.96, 1.44]
-        #          * These must be between 0 and 1
-        
         # create empty folder for processed data
         save_ddir = self.save_le.text()
         if os.path.isdir(save_ddir):
@@ -1145,7 +1216,7 @@ class RawRecordingSelectionPopup(QtWidgets.QDialog):
         """ Worker successfully completed the processing pipeline """
         self.last_saved_ddir = str(self.save_le.text())
         msg = 'Data processing complete!<br><br>Load another recording?'
-        res = gi.MsgboxSave(msg).exec()
+        res = gi.MsgboxSave(msg, parent=self).exec()
         if res == QtWidgets.QMessageBox.Yes:
             self.back_btn.click()  # select another recording for processing
         else:  # close window
@@ -1154,7 +1225,7 @@ class RawRecordingSelectionPopup(QtWidgets.QDialog):
     @QtCore.pyqtSlot(str)
     def pipeline_error_slot(self, error_msg):
         """ Worker encountered an error in the processing pipeline """
-        gi.MsgboxError(error_msg).exec()
+        gi.MsgboxError(error_msg, parent=self).exec()
         # delete incomplete recording folder
         save_ddir = self.save_le.text()
         if os.path.isdir(save_ddir):
@@ -1181,15 +1252,13 @@ class RawRecordingSelectionPopup(QtWidgets.QDialog):
     def back_to_selection(self):
         """ Return to the raw data selection step """
         self.setWindowTitle('Select a raw data source')
-        self.recording = None
         self.back_btn.setVisible(False)
         self.probe_map_btn.setVisible(True)
         self.pipeline_btn.setVisible(False)
+        self.pipeline_btn.setEnabled(False)
         self.ddir_gbox.setEnabled(True)
         self.probe_gbox.setVisible(False)
         self.save_gbox.setVisible(False)
-        self.params_widget.trange.set_duration(np.inf)
-        self.params_widget.lfp_fs.set_fs(None)
         # delete probe assignment widget
         self.probe_vbox.removeWidget(self.paw)
         self.paw.deleteLater()
