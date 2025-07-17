@@ -6,7 +6,7 @@ dependencies:
   - numpy=1.26.0
   - pandas=2.1.1
   - matplotlib=3.8.0
-  - scipy=1.11.4
+  - scipy=1.13.4
   - scikit-learn=1.2.2
   - pyqt=5.15.10
   - h5py=3.9.0
