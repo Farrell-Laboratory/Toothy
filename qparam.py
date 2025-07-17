@@ -394,10 +394,10 @@ class SpinboxLfpFS(Spinbox):
         """ Check if original FS is a multiple of the downsampled FS """
         if self.fs is None: return
         lfp_fs = self.box.value()
-        ds_factor = self.fs / lfp_fs
-        x = (self.fs/lfp_fs != int(self.fs/lfp_fs))
-        tt = (f'WARNING: Raw recording ({self.fs} Hz) not evenly divisible by '
-              f'the target sampling rate ({lfp_fs} Hz).')
+        #ds_factor = self.fs / lfp_fs
+        #x = (self.fs/lfp_fs != int(self.fs/lfp_fs))
+        x = self.fs < lfp_fs
+        tt = f'WARNING: Downsampled FS cannot be greater than the original sampling rate ({self.fs:.2f}).'
         self.set_warning(x, tooltip=tt)
     
     def set_fs(self, fs):
@@ -592,9 +592,7 @@ class SpinboxTimeRange(SpinboxRange):
     def enable_disable_toggles(self):
         """ Disable timepoint conversion if duration of recording is unknown """
         for i,box in enumerate(self.boxes):
-            box.abs_btn.setEnabled(self.dur < np.inf)
-            #x = (self.dur < np.inf) and (box.value() < 0+i)
-            #box.abs_btn.setEnabled(x)
+            box.abs_btn.setVisible(self.dur < np.inf)
     
     def update_param(self, val):
         """ Set time range """
