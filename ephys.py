@@ -870,7 +870,11 @@ def estimate_theta_chan(STD, noise_idx=np.array([], dtype='int')):
     """ Estimate optimal theta (fissure) channel (max power in theta range) """
     theta_pwr = np.array(STD.theta.values)
     theta_pwr[noise_idx] = np.nan
-    return np.nanargmax(theta_pwr)
+    try:
+        res = np.nanargmax(theta_pwr)
+    except ValueError:
+        res = 0
+    return res
 
 def estimate_ripple_chan(STD, noise_idx=np.array([], dtype='int')):
     """ Estimate optimal ripple channel (max ripple power among channels with low theta power) """
@@ -880,14 +884,22 @@ def estimate_ripple_chan(STD, noise_idx=np.array([], dtype='int')):
     # eliminate channels above 60th %ile of theta power
     norm_swr[norm_theta >= np.nanpercentile(norm_theta, 60)] = np.nan
     norm_swr[norm_theta == 0] = np.nan
-    return np.nanargmax(norm_swr / norm_theta)
+    try:
+        res = np.nanargmax(norm_swr / norm_theta)
+    except ValueError:
+        res = 0
+    return res
     
 def estimate_hil_chan(DS_MEAN, noise_idx=np.array([], dtype='int')):
     """ Estimate optimal DS (hilus) channel (large and frequent waveforms) """
     arr = DS_MEAN[['amp','n_valid']].values.T
     arr[:, noise_idx] = np.nan
     norm_amp, norm_n = map(pyfx.Normalize, arr)
-    return np.nanargmax(norm_amp * norm_n)
+    try:
+        res = np.nanargmax(norm_amp * norm_n)
+    except ValueError:
+        res = 0
+    return res
 
 def get_inst_freq(x, lfp_fs, swr_freq=[120,180]):
     """ Calculate LFP instantaneous frequency for ripple detection """

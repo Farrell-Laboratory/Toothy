@@ -41,7 +41,7 @@ def Downsample(arr, n):
 def Normalize(collection):
     """ Normalize data between 0 and 1 """
     Max=np.nanmax(collection)
-    Min=min(collection)
+    Min=np.nanmin(collection)
     return np.array([(i-Min)/(Max-Min) for i in collection])
 
 def Closest(num, collection):
