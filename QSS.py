@@ -63,6 +63,9 @@ BOLD_INSET_BTN = deepcopy(INSET_BTN)
 BOLD_INSET_BTN['QPushButton']['border-width'] = '3px'
 BOLD_INSET_BTN['QPushButton']['font-weight'] = 'bold'
 
+HOME_BTN = deepcopy(BOLD_INSET_BTN)
+HOME_BTN['QPushButton']['background-color'] = 'gainsboro'
+
 ###   expand/collapse buttons for settings panes, plots, etc
 
 EXPAND_LEFT_BTN = deepcopy(INSET_BTN)  # frequency plots
@@ -108,7 +111,7 @@ ANALYSIS_BTN = {'QPushButton' : {
                                         }
                 }
 
-
+###   convert between relative and absolute timepoints
 
 TRANGE_TOGGLE_BTN = deepcopy(TOGGLE_BTN)
 TRANGE_TOGGLE_BTN['QPushButton'].update({
@@ -119,6 +122,14 @@ TRANGE_TOGGLE_BTN['QPushButton'].update({
                                         #'background-image':'url(:/icons/swap_arrows_vert.png)',
                                          'padding':'1px',
                                          })
+
+###   show/hide raw recording metadata
+
+META_TOGGLE_BTN = deepcopy(TOGGLE_BTN)
+META_TOGGLE_BTN['QPushButton'].update({
+                                      'image' : 'url(:/icons/info_blue.png)',
+                                      'padding' : '4px',
+                                      })
 
 ##############################################################################
 ################                     ICONS                    ################
@@ -132,7 +143,7 @@ ICON_BTN = {'QPushButton' : {
             
             'QPushButton#params_warning' : {
                                            'image' : 'url(:/icons/warning_yellow.png)',
-                                           }
+                                           },
             }
 
 

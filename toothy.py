@@ -68,9 +68,9 @@ class toothy(QtWidgets.QMainWindow):
                           self.probe_btn,       # create probe object
                           self.process_btn,     # process raw recording
                           self.analyze_btn]     # launch analysis window
+        
         for btn in self.home_btns:
-            
-            btn.setStyleSheet(pyfx.dict2ss(QSS.BOLD_INSET_BTN))
+            btn.setStyleSheet(pyfx.dict2ss(QSS.HOME_BTN))
             self.centralLayout.addWidget(btn)
         self.setCentralWidget(self.centralWidget)
     
