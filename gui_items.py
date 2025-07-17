@@ -888,7 +888,6 @@ class MsgWindow(QtWidgets.QDialog):
 ################                                              ################
 ##############################################################################
 ##############################################################################
-        
 
 class Popup(QtWidgets.QDialog):
     """ Simple popup window to display any widget(s) """
@@ -905,8 +904,8 @@ class Popup(QtWidgets.QDialog):
         screen_rect = pyfx.ScreenRect()
         qrect.moveCenter(screen_rect.center())  # move center of qr to center of screen
         self.move(qrect.topLeft())
-        
-        
+
+
 class MatplotlibPopup(Popup):
     """ Simple popup window to display Matplotlib figure """
     def __init__(self, fig, toolbar_pos='top', title='', parent=None):
@@ -936,6 +935,33 @@ class MatplotlibPopup(Popup):
     def closeEvent(self, event):
         plt.close()
         self.deleteLater()
+        
+        
+class ButtonPopup(QtWidgets.QDialog):
+    def __init__(self, *items, orientation='v', label='Select an option', 
+                 title='', parent=None):
+        super().__init__(parent)
+        self.label = QtWidgets.QLabel(label)
+        self.btns = [QtWidgets.QPushButton(x) for x in items]
+        for btn in self.btns:
+            btn.setStyleSheet(pyfx.dict2ss(QSS.TOGGLE_BTN))
+            btn.clicked.connect(self.select_btn)
+        layout = pyfx.get_widget_container(orientation, self.label, 5, *self.btns, cm=None)
+        self.setLayout(layout)
+        self.setWindowTitle(title)
+        self.show(); self.raise_()
+    
+    def select_btn(self):
+        self.result = str(self.sender().text())
+        self.accept()
+    
+    @classmethod
+    def run(cls, *args, **kwargs):
+        """ Execute button popup """
+        pyfx.qapp()
+        dlg = cls(*args, **kwargs)
+        if dlg.exec():
+            return str(dlg.result)
         
         
 class AuxDialog(QtWidgets.QDialog):
@@ -1510,7 +1536,71 @@ class ParameterPopup(QtWidgets.QDialog):
         if fpath:
             self.SAVE_LOCATION = fpath
             self.accept()
-            
+
+class RawMeta(QtWidgets.QWidget):
+    meta = dict.fromkeys(['ElectricalSeries','FS','nsamples','duration','total_ch','ch_names'])
+    
+    def __init__(self, recording=None, parent=None):
+        super().__init__(parent)
+        self.gen_layout()
+        self.update_recording(recording)
+    
+    def gen_layout(self):
+        self.qform = QtWidgets.QFormLayout(self)
+        self.qform.setContentsMargins(11,0,11,0)
+        self.meta_w = {}
+        self.meta_w['ElectricalSeries'] = QtWidgets.QLineEdit()
+        self.meta_w['FS']       = QtWidgets.QLineEdit()
+        self.meta_w['nsamples'] = QtWidgets.QLineEdit()
+        self.meta_w['duration'] = QtWidgets.QLineEdit()
+        self.meta_w['total_ch'] = QtWidgets.QLineEdit()
+        self.meta_w['ch_names'] = QtWidgets.QPlainTextEdit()
+        for k,mw in self.meta_w.items():
+            mw.setReadOnly(True)
+            self.qform.addRow(k+':', mw)
+        # te_w = self.meta_w['FS'].sizeHint().width()
+        # te_h = self.meta_w['ch_names'].sizeHint().height()
+        # self.meta_w['ch_names'].sizeHint = lambda: QtCore.QSize(te_w, te_h)
+        # hide channel names
+        self.qform.itemAt(5, QtWidgets.QFormLayout.LabelRole).widget().setVisible(False)
+        self.qform.itemAt(5, QtWidgets.QFormLayout.FieldRole).widget().setVisible(False)
+    
+    def update_recording(self, recording):
+        self.recording = recording
+        if self.recording is None:
+            self.meta = dict.fromkeys(list(self.meta.keys()))
+        else:
+            self.meta['FS'] = self.recording.get_sampling_frequency()
+            self.meta['nsamples'] = self.recording.get_num_samples()
+            self.meta['duration'] = self.recording.get_duration()
+            self.meta['ch_names'] = self.recording.get_channel_ids().astype('str')
+            self.meta['total_ch'] = len(self.meta['ch_names'])
+            is_nwb = self.recording.__class__.__name__ == 'NwbRecordingExtractor'
+            if is_nwb:
+                es_name = os.path.basename(self.recording.electrical_series_path)
+                self.meta['ElectricalSeries'] = es_name
+            else:
+                self.meta['ElectricalSeries'] = None
+        self.update_gui_from_ddict(self.meta)
+        #txt = os.linesep.join([f'{k} = {v}' for k,v in self.meta.items()])
+        #self.setPlainText(txt)
+        #self.setVisible(self.recording is not None)
+    
+    def update_gui_from_ddict(self, ddict):
+        if ddict['FS'] is None:
+            for mw in self.meta_w.values():
+                mw.clear()
+        else:
+            self.meta_w['FS'].setText(f"{ddict['FS']:.1f} Hz")
+            self.meta_w['nsamples'].setText(f"{ddict['nsamples']:.0f}")
+            self.meta_w['duration'].setText(f"{ddict['duration']:.2f} s")
+            self.meta_w['total_ch'].setText(f"{ddict['total_ch']:.0f}")
+            self.meta_w['ch_names'].setPlainText(str(ddict['ch_names'])[1:-1])
+            es_name = ddict['ElectricalSeries']
+            is_nwb = bool(es_name is not None)
+            self.meta_w['ElectricalSeries'].setText(f'{str(es_name)}')
+            self.qform.itemAt(0, QtWidgets.QFormLayout.LabelRole).widget().setVisible(is_nwb)
+            self.qform.itemAt(0, QtWidgets.QFormLayout.FieldRole).widget().setVisible(is_nwb)
             
 if __name__ == '__main__':
     import sys
