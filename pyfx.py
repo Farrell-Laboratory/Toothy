@@ -142,13 +142,14 @@ def butter_bandpass(lowcut, highcut, lfp_fs, order=3):
     nyq = 0.5 * lfp_fs
     low = lowcut / nyq
     high = highcut / nyq
-    b, a = scipy.signal.butter(order, [low, high], btype='band')
-    return b, a
+    #b, a = scipy.signal.butter(order, [low, high], btype='band')
+    sos = scipy.signal.butter(order, [low, high], btype='band', output='sos')
+    return sos
 
 def butter_bandpass_filter(data, lowcut, highcut, lfp_fs, order=3, axis=-1):
     """ Return bandpass-filtered data arrays """
-    b, a = butter_bandpass(lowcut, highcut, lfp_fs, order=order)
-    y = scipy.signal.filtfilt(b, a, data, axis=axis)
+    sos = butter_bandpass(lowcut, highcut, lfp_fs, order=order)
+    y = scipy.signal.sosfiltfilt(sos, data, padtype='odd', axis=axis)
     return y
 
 
@@ -456,13 +457,15 @@ def get_widget_container(orientation, *widgets, widget='none', **kwargs):
     layout = get_qboxlayout(orientation)
     if cm is not None: layout.setContentsMargins(*cm)
     layout.setSpacing(kwargs.get('spacing', 1))
+    
     for i,w in enumerate(widgets):
         ddict = {}  # set item stretch and alignment within container layout
         if len(stretch_factors) == len(widgets):
             ddict['stretch'] = stretch_factors[i]
         if len(alignments) == len(widgets) and w.inherits('QWidget'):
             ddict['alignment'] = alignments[i]
-        if   w.inherits('QWidget'): layout.addWidget(w, **ddict) # add widget
+        if isinstance(w, int)     : layout.addSpacing(w) # add spacing
+        elif w.inherits('QWidget'): layout.addWidget(w, **ddict) # add widget
         elif w.inherits('QLayout'): layout.addLayout(w, **ddict) # add layout
     if widget in ['widget','frame','scroll']:
         w = QtWidgets.QWidget() if widget in ['widget','scroll'] else QtWidgets.QFrame()
