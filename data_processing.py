@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import json
 import neo
+import h5py
 import time
 import pickle
 import scipy.io as so
@@ -100,36 +101,74 @@ def get_data_format(ppath):
     else:
         raise Exception(f'{ppath} is not a supported data file.')
 
-def get_extractor(ppath, data_format, data_array=None, metadata={}):
+def get_nwb_eseries(ppath):
+    """ Return list of valid ElectricalSeries datasets in NWB file """
+    good_series = []
+    # get ElectricalSeries names
+    with h5py.File(ppath, 'r') as f:
+        acquisition_group = f.get('acquisition')
+        if acquisition_group:
+            series_names = list(acquisition_group.keys())
+        else: series_names = []
+        for name in series_names:
+            es = f["acquisition"][name]
+            if "electrodes" in es:
+                good_series.append(name)
+    return good_series
+
+def get_extractor(ppath, data_format, **kwargs):
     """ Return spikeinterface extractor object for the given recording """
+    data_array = kwargs.get('data_array')
+    metadata   = kwargs.get('metadata', {})
+    electrical_series_path = kwargs.get('electrical_series_path')
+    
     if data_format in ['NPY','MAT']:
-        # generic Numpy Recording extractor for raw data array
         assert isinstance(data_array, np.ndarray)
         assert all([k in metadata for k in ['fs','units']])
-        recording = spikeinterface.NumpyRecording(data_array, metadata['fs'])
-        voltage_units_to_gains = {"V": 1e6, "Volt": 1e6, "Volts": 1e6, "mV": 1e3, "uV": 1.0}
-        gain_to_uV = np.repeat(voltage_units_to_gains[metadata['units']], metadata['nch'])
-        recording.set_channel_gains(gain_to_uV)
-        recording.set_channel_offsets(np.zeros(metadata['nch']))
+        try: # generic Numpy Recording extractor for raw data array
+            recording = spikeinterface.NumpyRecording(data_array, metadata['fs'])
+            voltage_units_to_gains = {"V": 1e6, "Volt": 1e6, "Volts": 1e6, "mV": 1e3, "uV": 1.0}
+            gain_to_uV = np.repeat(voltage_units_to_gains[metadata['units']], metadata['nch'])
+            recording.set_channel_gains(gain_to_uV)
+            recording.set_channel_offsets(np.zeros(metadata['nch']))
+        except:
+            raise Exception(f'Unable to extract {data_format} array.')
     elif data_format == 'NeuroNexus':
-        # custom NeuroNexus extractor for ephys channels only
-        recording = _NeuroNexusRecordingExtractor(ppath, stream_id='0')
+        try: # custom NeuroNexus extractor for ephys channels only
+            recording = _NeuroNexusRecordingExtractor(ppath, stream_id='0')
+        except:
+            raise Exception('Unable to load NeuroNexus extractor.')
     elif data_format == 'OpenEphys':
-        # OpenEphys extractor
-        exp_folder = os.path.dirname(os.path.dirname(ppath))
-        folder_path = os.path.dirname(exp_folder)
-        experiment_names = [os.path.basename(exp_folder)]
-        recording = extractors.OpenEphysBinaryRecordingExtractor(folder_path=folder_path, stream_id='0',
-                                                                 experiment_names=experiment_names)
+        try: # OpenEphys extractor
+            exp_folder = os.path.dirname(os.path.dirname(ppath))
+            folder_path = os.path.dirname(exp_folder)
+            experiment_names = [os.path.basename(exp_folder)]
+            recording = extractors.OpenEphysBinaryRecordingExtractor(folder_path=folder_path, stream_id='0',
+                                                                     experiment_names=experiment_names)
+        except:
+            raise Exception('Unable to load OpenEphys extractor.')
     elif data_format == 'Neuralynx':
-        # Neuralynx extractor
-        folder_path = os.path.dirname(ppath)
-        exclude = [f for f in os.listdir(folder_path) if not os.path.isfile(Path(folder_path, f))]
-        recording = extractors.NeuralynxRecordingExtractor(folder_path=folder_path, stream_id='0',
-                                                           exclude_filename=exclude)
+        try: # Neuralynx extractor
+            folder_path = os.path.dirname(ppath)
+            exclude = [f for f in os.listdir(folder_path) if not os.path.isfile(Path(folder_path, f))]
+            recording = extractors.NeuralynxRecordingExtractor(folder_path=folder_path, stream_id='0',
+                                                               exclude_filename=exclude)
+        except:
+            raise Exception('Unable to load Neuralynx extractor.')
     elif data_format == 'NWB':
-        # NWB extractor
-        recording = extractors.NwbRecordingExtractor(file_path=ppath)
+        try: # NWB extractor
+            recording = extractors.NwbRecordingExtractor(file_path=ppath,
+                                                         electrical_series_path=electrical_series_path)
+        except:
+            eseries = get_nwb_eseries(ppath)
+            if len(eseries) == 0:
+                raise Exception('NWB file contains no ElectricalSeries with valid electrodes.')
+            es_name = eseries[0]; es_path = f'acquisition/{es_name}'
+            try:
+                recording = extractors.NwbRecordingExtractor(file_path=ppath,
+                                                             electrical_series_path=es_path)
+            except:
+                raise Exception('Unable to load NWB extractor.')
     else:
         raise Exception(f'Unsupported data format {data_format}.')
     recording.annotate(ppath=ppath, data_format=data_format)
@@ -305,19 +344,7 @@ def read_data_from_dict(ddict):
             if len(v) == 0: continue
             if np.array(v).ndim != 2: continue
             data_dict[k] = v
-    if len(data_dict) == 1:
-        data = list(data_dict.values())[0]
-    elif len(data_dict) > 1:
-        txt = ('The following keys represent 2-dimensional data arrays.<br>'
-               'Which one corresponds to the raw LFP signals?')
-        key = choose_array_key(list(data_dict.keys()), txt=txt)
-        if key is not None:
-            data = data_dict[key] # user selected key
-        else:
-            data = np.array([])   # user exited popup
-    elif len(data_dict) == 0:
-        data = np.array([])
-    return data, meta
+    return data_dict, meta
 
 def read_array_file(fpath, raise_exception=False):
     """ Load raw data from .npy or .mat file """
@@ -334,24 +361,33 @@ def read_array_file(fpath, raise_exception=False):
         if ext == '.npy':
             npyfile = np.load(fpath, allow_pickle=True)
             if isinstance(npyfile, np.ndarray):
-                data = np.array(npyfile)
+                data_dict = {}
+                if npyfile.ndim == 2:
+                    data_dict['data'] = np.array(npyfile)
+                else:  # data array not 2-dimensional
+                    exception_msg = 'NumPy data array must be 2-dimensional.'
+                    raise Exception(exception_msg)
             elif isinstance(npyfile, dict):
-                data, meta = read_data_from_dict(npyfile)
+                data_dict, meta = read_data_from_dict(npyfile)
+                if len(data_dict) == 0:
+                    exception_msg = 'NumPy file must contain a 2-dimensional data array.'
+                    raise Exception(exception_msg)
             else:
                 exception_msg = 'NumPy file must contain data array or dictionary.'
                 raise Exception(exception_msg)
         elif ext == '.mat':
             matfile = so.loadmat(fpath, squeeze_me=True)
-            data, meta = read_data_from_dict(matfile)
-        # make sure data is 2-dimensional
-        if data.ndim != 2:
-            exception_msg = 'Data must be a 2-dimensional array.'
-            raise Exception(exception_msg)
+            data_dict, meta = read_data_from_dict(matfile)
+            if len(data_dict) == 0:
+                exception_msg = 'MAT file must contain a 2-dimensional data array.'
+                raise Exception(exception_msg)
+        else:
+            exception_msg = 'Data file must have ".npy" or ".mat" extension.'
     except:
-        data = None
+        data_dict = None
         if raise_exception:
             raise Exception(exception_msg)
-    return data, meta
+    return data_dict, meta
 
 
 ##############################################################################
