@@ -2267,11 +2267,13 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         theta_chan, ripple_chan, hil_chan = event_channels
         if hil_chan in self.DS_ALL.ch:
             DS_DF = pd.DataFrame(self.DS_ALL.loc[hil_chan])
+            DS_DF = DS_DF[DS_DF['is_valid']==1].reset_index(drop=True)
         else:
             DS_DF = pd.DataFrame(columns=self.DS_ALL.columns)
         DS_DF.to_csv(Path(self.ddir, f'DS_DF_probe{self.iprb}-shank{self.ishank}'), index_label=False)
         if ripple_chan in self.SWR_ALL.ch:
             SWR_DF = pd.DataFrame(self.SWR_ALL.loc[ripple_chan])
+            SWR_DF = SWR_DF[SWR_DF['is_valid']==1].reset_index(drop=True)
         else:
             SWR_DF = pd.DataFrame(columns=self.SWR_ALL.columns)
         SWR_DF.to_csv(Path(self.ddir, f'SWR_DF_probe{self.iprb}-shank{self.ishank}'), index_label=False)
