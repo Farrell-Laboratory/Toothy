@@ -14,6 +14,7 @@ import pandas as pd
 import matplotlib.colors as mcolors
 import colorsys
 import matplotlib.pyplot as plt
+import warnings
 from PyQt5 import QtWidgets, QtCore, QtGui
 import pdb
 
@@ -40,8 +41,12 @@ def Downsample(arr, n):
 
 def Normalize(collection):
     """ Normalize data between 0 and 1 """
-    Max=np.nanmax(collection)
-    Min=np.nanmin(collection)
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', r'All-NaN (slice|axis) encountered')
+        Max=np.nanmax(collection)
+        Min=np.nanmin(collection)
+    if Max == Min:
+        return np.zeros(len(collection))
     return np.array([(i-Min)/(Max-Min) for i in collection])
 
 def Closest(num, collection):
@@ -167,7 +172,9 @@ def Cmap(data, cmap=plt.cm.coolwarm, norm_data=None, alpha=1.0, use_alpha=False)
     if norm_data is None:
         norm_data = data
     try:
-        normal = plt.cm.colors.Normalize(np.nanmin(norm_data), np.nanmax(norm_data))
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', r'All-NaN (slice|axis) encountered')
+            normal = plt.cm.colors.Normalize(np.nanmin(norm_data), np.nanmax(norm_data))
         arr = cmap(normal(data))
         arr[:, 3] = alpha
         if use_alpha: return arr
