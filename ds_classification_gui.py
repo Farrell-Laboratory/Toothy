@@ -308,9 +308,8 @@ class DS_CSDWidget(QtWidgets.QFrame):
         self.vlay.addWidget(self.gbox4)
         
         # update classification dataframe with current clustering method/class labels in PCA plot
-        self.save_df_btn = QtWidgets.QPushButton('Update classification')
+        self.save_df_btn = QtWidgets.QPushButton('Re-save classification')
         self.save_df_btn.setEnabled(False)
-        self.vlay.addWidget(self.save_df_btn)
         
         # action buttons
         bbox = QtWidgets.QHBoxLayout()
@@ -320,6 +319,7 @@ class DS_CSDWidget(QtWidgets.QFrame):
         bbox.addWidget(self.go_btn)   # perform CSD calculation/clustering
         bbox.addWidget(self.save_btn) # save CSD and DS classification
         self.vlay.addLayout(bbox)
+        self.vlay.addWidget(self.save_df_btn)
         self.setLayout(self.vlay)
     
     def update_gui_from_ddict(self, ddict):
@@ -838,6 +838,7 @@ class DS_CSDWindow(QtWidgets.QDialog):
             # save PCA values and classification with the dataset
             self.DS_DF.to_hdf(gg.filename, key=f'{K}/DS_DF')
             gg[K].attrs.update(self.CSD_PARAMS)  # save params
+        self.DS_DF.to_csv(Path(self.ddir, f'DS_DF_probe{self.iprb}-shank{self.ishank}'))
         # pop-up messagebox appears when save is complete
         res = gi.MsgboxSave('CSD data saved!\nExit window?').exec()
         if res == QtWidgets.QMessageBox.Yes:
@@ -853,6 +854,7 @@ class DS_CSDWindow(QtWidgets.QDialog):
         with h5py.File(Path(self.ddir, 'CSDs.hdf5'), 'r+') as gg:
             self.DS_DF.to_hdf(gg.filename, key=f'{K}/DS_DF')
             gg[K].attrs['clus_algo'] = str(self.CSD_PARAMS['clus_algo'])
+        self.DS_DF.to_csv(Path(self.ddir, f'DS_DF_probe{self.iprb}-shank{self.ishank}'))
         msgbox = gi.MsgboxSave('Current DS classification saved to file!')
         msgbox.setStandardButtons(QtWidgets.QMessageBox.Ok)
         msgbox.exec()

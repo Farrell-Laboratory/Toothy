@@ -982,10 +982,18 @@ def validate_processed_ddir(ddir):
 
 def validate_classification_ddir(ddir, iprobe, ishank):
     """ Check whether directory contains required files for DS classification """
+    try    : files = os.listdir(ddir)  
+    except : return False
+    if f'DS_DF_{iprobe}' in files:
+        PROBE_DS_DF = pd.read_csv(Path(ddir, f'DS_DF_{iprobe}')).reset_index(drop=True)
+        shanks = np.unique(PROBE_DS_DF['shank'].values)
+        for ishk in shanks:
+            DDF = PROBE_DS_DF[PROBE_DS_DF['shank']==ishk].reset_index(drop=True)
+            DDF.to_csv(Path(ddir, f'DS_DF_probe{iprobe}-shank{ishk}'), index_label=False)
+        os.remove(Path(ddir, f'DS_DF_{iprobe}'))
     try:
-        files = os.listdir(ddir)
-        assert f'DS_DF_{iprobe}' in files
-        assert not ephys.load_ds_dataset(ddir, iprobe, ishank).empty
+        assert f'DS_DF_probe{iprobe}-shank{ishank}' in files
+        assert len(ephys.load_ds_dataset(ddir, iprobe, ishank)) > 1
         llist = ephys.load_event_channels(ddir, iprobe, ishank)
     except:
         return False
