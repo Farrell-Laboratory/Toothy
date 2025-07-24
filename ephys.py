@@ -15,6 +15,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 import scipy
 import seaborn as sns
+import warnings
+from copy import deepcopy
 from PyQt5 import QtWidgets
 import pickle
 import quantities as pq
@@ -604,15 +606,17 @@ def load_h5_event_df(ff, event, iprb=0):
 def clean_event_df(DF_ALL, STD, probe):
     """ Return single-event dataframe with channel, shanks, event statuses, 
     and frequency band amplitudes for each event instance """
+    if len(DF_ALL)==1 and all(np.isnan(DF_ALL.idx)):
+        DF_ALL = pd.DataFrame(columns=DF_ALL.columns)
     DF_ALL.insert(0, 'ch', np.array(DF_ALL.index.values))
     if 'shank' not in DF_ALL.columns:
-        DF_ALL['shank'] = pd.Series(probe.shank_ids.astype('int'))
+        DF_ALL['shank'] = pd.Series(probe.shank_ids.astype('int'))[DF_ALL.index]
     if 'status' not in DF_ALL.columns: # track original/added/removed events
         DF_ALL['status'] = 1
     if 'is_valid' not in DF_ALL.columns:
         DF_ALL['is_valid'] = np.array(DF_ALL['status'] > 0, dtype='int')
     # add freq band amplitudes (one value per channel)
-    DF_ALL[STD.columns] = STD
+    DF_ALL[STD.columns] = STD.loc[DF_ALL.index, :]
     DF_ALL['n_valid'] = DF_ALL.groupby('ch')['is_valid'].agg('sum')
     return DF_ALL
 
@@ -634,7 +638,10 @@ def replace_missing_channels(DF, channels):
     # fill in rows for any channels with no detected events
     missing_ch = np.setdiff1d(channels, DF.index.values)
     missing_df = pd.DataFrame(0.0, index=missing_ch, columns=DF.columns)
-    DF = pd.concat([DF, missing_df], axis=0, ignore_index=False).sort_index()
+    if len(missing_ch) == len(channels):
+        DF = missing_df
+    else:
+        DF = pd.concat([DF, missing_df], axis=0, ignore_index=False).sort_index()
     # set missing values to NaN (except for event counts, which are zero)
     DF.loc[missing_ch, [c for c in DF.columns if c!='n_valid']] = np.nan
     return DF
@@ -726,8 +733,19 @@ def load_event_channels_deprec(ddir, iprb, ishank=-1):
     else:
         return event_channels
 
-def load_ds_dataset(ddir, iprb, ishank=-1, fill_shank=True):
-    """ Load DS event dataframe for given probe and shank(s) """
+def load_ds_dataset(ddir, iprb, ishank, valid_only=True):
+    """ Load DS event dataframe for given probe and shank """
+    fname = f'DS_DF_probe{iprb}-shank{ishank}'
+    try:
+        DS_DF = pd.read_csv(Path(ddir, fname)).reset_index(drop=True)
+    except:
+        return None
+    if valid_only and 'is_valid' in DS_DF.columns:
+        DS_DF = DS_DF[DS_DF['is_valid']==1].reset_index(drop=True)
+    return DS_DF
+    
+def load_ds_dataset_orig(ddir, iprb, ishank=-1, valid_only=True):
+    """ Deprecated """
     try:
         DS_DF = pd.read_csv(Path(ddir, f'DS_DF_{iprb}')).reset_index(drop=True)
     except:
@@ -735,6 +753,8 @@ def load_ds_dataset(ddir, iprb, ishank=-1, fill_shank=True):
     if 'shank' not in DS_DF.columns:
         probe = read_probe_group(ddir).probes[iprb]
         DS_DF['shank'] = pd.Series(probe.shank_ids.astype('int'))
+    if valid_only and 'is_valid' in DS_DF.columns:
+        DS_DF = DS_DF[DS_DF['is_valid']==1].reset_index(drop=True)
     if ishank == -1 or ishank is None:
         return DS_DF
     elif ishank in DS_DF.shank:
@@ -773,7 +793,10 @@ def getwaves(LFP, iev, iwin, center=False):
 
 def getavg(LFP, iev, iwin, center=False):
     """ Get event-averaged LFP waveform """
-    return np.nanmean(getwaves(LFP, iev, iwin, center), axis=0)
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', r'Mean of empty slice')
+        d = np.nanmean(getwaves(LFP, iev, iwin, center), axis=0)
+    return d
 
 def getyerrs(arr, mode='std'):
     """ Get mean signal and variance for 2D array $arr (instance x timepoint) """
@@ -1118,63 +1141,113 @@ def plot_ds_width_height(DF_ALL, DF_MEAN, ax, pal):
     _ = [ol.set(mec=ax.err_bars[0].get_c(), mfc='white') for ol in ax.outlines]
     return ax
 
-def plot_channel_events(DF_ALL, DF_MEAN, ax0, ax1, ax2, pal='default', **kwargs):
+def plot_channel_events(DF_ALL, DF_MEAN, ax0, ax1, ax2, pal='default', 
+                         noise_train=None, **kwargs):
     """ Plot summary statistics for ripples or DSs on each LFP channel """
     # plot ripple or DS events
     if 'width_height' in DF_ALL.columns : EVENT = 'DS'
     elif 'freq' in DF_ALL.columns       : EVENT = 'Ripple'
     channels = np.array(DF_MEAN.ch)
+    present_ch = np.unique(DF_ALL.ch)
+    missing_ch = np.setdiff1d(channels, present_ch)
     linewidth = kwargs.get('lw', 3.5)
     markersize = kwargs.get('ms', 5)
-    
     swr_markersize = kwargs.get('swr_ms', 50)
     swr_markeredgewidth = kwargs.get('swr_mew', 2)
     
     # set default palette
     if pal == 'default':
         pal = sns.cubehelix_palette(dark=0.2, light=0.9, rot=0.4, as_cmap=True)
+    # identify noisy channels
+    if noise_train is None or len(noise_train) != len(channels):
+        noise_train = np.zeros(len(channels), dtype='int')
+    inoise = np.nonzero(noise_train)[0]
+    noisy_ch = channels[inoise]
     
     # plot number of events
     if ax0 is not None:
-        _ = ax0.bar(DF_MEAN.ch, DF_MEAN.n_valid, lw=1, color=pyfx.Cmap(DF_MEAN.n_valid, pal))
+        nvalid = deepcopy(DF_MEAN.n_valid.values)
+        nvalid[inoise] = np.nan # exclude noisy channels from colormapping
+        clrs = pyfx.Cmap(nvalid, pal)
+        clrs[inoise] = 0.85
+        _ = ax0.bar(DF_MEAN.ch, DF_MEAN.n_valid, lw=1, color=clrs)
         ax0.set(xlabel='Channel', ylabel='# events', xmargin=0.05)
         ax0.set_title(f'{EVENT} count', fontdict=dict(fontweight='bold'))
-        ax0.xaxis.set_major_locator(matplotlib.ticker.MultipleLocator(5))
     
     # plot event amplitude
     if ax1 is not None:
-        _ = sns.stripplot(DF_ALL, x='ch', y='amp', hue='amp', size=markersize, 
-                          palette=pal, legend=False, ax=ax1)
+        DDF = deepcopy(DF_ALL[['ch','amp']])
+        if 0 < len(missing_ch) < len(channels): # add missing channels with "NaN" amps
+            missing_ddf = pd.DataFrame({'ch':missing_ch,
+                                        'amp':np.ones(len(missing_ch))*-1})
+            DDF = pd.concat([DDF, missing_ddf],
+                            axis=0).sort_values('ch').reset_index(drop=True)
+            DDF.set_index('ch', drop=False, inplace=True)
+            DDF.index.name = None
+            DDF.replace({'amp':{-1:np.nan}}, inplace=True)
+        if not DDF.empty:
+            DDF['amp_hue'] = list(DDF['amp'])
+            DDF.loc[noisy_ch, 'amp_hue'] = np.nan
+            unique_amps = np.unique(DDF['amp_hue'].dropna().values)
+            if len(unique_amps) > 1: # colormap within non-NaN amplitudes
+                DDF.loc[noisy_ch, 'amp_hue'] = np.nanmin(DDF['amp_hue'])
+            else: # make sure hue column has multiple unique values
+                DDF['amp_hue'] = list(DDF['ch'])
+            DDF.reset_index(drop=True, inplace=True)
+            _ = sns.stripplot(DDF, x='ch', y='amp', hue='amp_hue', size=markersize, 
+                              palette=pal, legend=False, ax=ax1)
+            xcoeff = channels[0]
+            for pch,coll in zip(present_ch, ax1.collections):
+                if pch in noisy_ch: # set noisy channel markers to light gray
+                    coll.set_facecolor('lightgray')
+                elif len(unique_amps) <= 1:
+                    coll.set_facecolor(pal(0))
+                coll._offsets.data[:,0] += xcoeff
         ax1.set(xlabel='Channel', ylabel='Amplitude', xmargin=0.05)
         ax1.set_title(f'{EVENT} amplitude', fontdict=dict(fontweight='bold'))
-        ax1.xaxis.set_major_locator(matplotlib.ticker.MultipleLocator(5))
     
     if EVENT == 'DS' and ax2 is not None:
         # get standard error for channel half-width heights
         sem = DF_ALL[['ch','width_height']].groupby('ch').agg('sem')
         sem = replace_missing_channels(sem, channels)
         d,yerr = np.array([DF_MEAN.width_height.values, sem.width_height.values])
-        clrs = pyfx.Cmap(d, pal, use_alpha=True)
+        d2 = deepcopy(d)
+        d2[inoise] = np.nan # exclude noisy channels from colormapping
+        clrs = pyfx.Cmap(d2, pal, use_alpha=True)
+        clrs[inoise] = 0.85
+        clrs[:,3] = 1.0
         # plot summary data
         _ = ax2.vlines(DF_MEAN.ch, d-yerr, d+yerr, lw=3.5, zorder=-1, colors=clrs)
         _ = ax2.scatter(DF_MEAN.ch, d, ec=clrs, fc='white', s=75, lw=3, zorder=0)
         _ = ax2.scatter(DF_MEAN.ch, d, ec=clrs, fc=clrs*[1,1,1,0.2], s=75, lw=3, zorder=1)
         ax2.set(xlabel='Channel', ylabel='prominence / 2', xmargin=0.05)
         ax2.set_title('DS height above surround', fontdict=dict(fontweight='bold'))
-        ax2.xaxis.set_major_locator(matplotlib.ticker.MultipleLocator(5))
        
     elif EVENT == 'Ripple' and ax2 is not None:
+        ecs = []
+        for rgb in [np.array([0,1,0,1]), np.array([0,0,1,1])]:
+            ec = np.array([rgb] * len(DF_MEAN))
+            ec[inoise,3] = 0.2
+            ecs.append(ec)
+        ec_ripple, ec_theta = ecs
         tmp = d0,d1 = DF_MEAN[['norm_swr','norm_theta']].values.T
-        _ = ax2.scatter(DF_MEAN.ch, d0, fc='w', ec='g', s=swr_markersize, 
+        y0, y1 = np.sort(tmp.T).T
+        clrs = pyfx.Cmap(d0-d1, pal)
+        clrs[inoise] = 0.85
+        _ = ax2.scatter(DF_MEAN.ch, d0, fc='w', ec=ec_ripple, s=swr_markersize, 
                         lw=swr_markeredgewidth, label='ripple power')
-        _ = ax2.scatter(DF_MEAN.ch, d1, fc='w', ec='b', s=swr_markersize, 
+        _ = ax2.scatter(DF_MEAN.ch, d1, fc='w', ec=ec_theta, s=swr_markersize,
                         lw=swr_markeredgewidth, label='theta power')
-        _ = ax2.vlines(DF_MEAN.ch, *np.sort(tmp.T).T, lw=linewidth, zorder=0, 
-                       colors=pyfx.Cmap(d0-d1, pal))
+        _ = ax2.vlines(DF_MEAN.ch, y0, y1, lw=linewidth, zorder=0, 
+                       colors=clrs)
         _ = ax2.legend(frameon=False)
         ax2.set(xlabel='Channel', ylabel='Norm. power', xmargin=0.05)
         ax2.set_title('Ripple/theta power', fontdict=dict(fontweight='bold'))
-        ax2.xaxis.set_major_locator(matplotlib.ticker.MultipleLocator(5))
+    for ax in [ax0,ax1,ax2]:
+        if ax is not None:
+            ax.set_xticks(channels, labels=channels.astype('str'))
+            ax.xaxis.set_major_locator(matplotlib.ticker.MaxNLocator(10))
+            ax.set_xlim(channels[0]-1, channels[-1]+1)
     sns.despine()
     
     return (ax0,ax1,ax2)

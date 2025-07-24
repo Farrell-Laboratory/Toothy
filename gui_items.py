@@ -293,6 +293,21 @@ class MainSlider(matplotlib.widgets.Slider):
         """ Enable/disable slider """
         if x: self.set_style()
         else: self.set_style_off()
+        
+    def set_val(self, val):
+        """ Set slider value between minimum and maximum bounds """
+        val = min(max(val, self.valmin), self.valmax)
+        super().set_val(val)
+    
+    def update_range(self, valmin, valmax):
+        """ Update minimum and maximum bounds """
+        self.valmin = valmin
+        self.valmax = valmax
+        self.ax.set_xlim(valmin,valmax)
+        verts = self.poly.get_xy()
+        verts[[0,1,4],0] = valmin
+        self.poly.set_xy(verts)
+        self.canvas.draw_idle()
 
 
 ##############################################################################

@@ -276,7 +276,7 @@ class ProcessedRecordingSelectionPopup(QtWidgets.QDialog):
     def conversion_slot(self, transferred):
         # prompt user to delete original data files after migration
         msg = '<center>Conversion successful!<br>Delete remaining NPZ files?</center>'
-        res = gi.MsgboxSave(msg).exec()
+        res = gi.MsgboxSave(msg, parent=self).exec()
         if res == QtWidgets.QMessageBox.Yes:
             for fname in transferred:
                 os.remove(Path(self.ddir, fname))
@@ -322,7 +322,7 @@ class ProcessedRecordingSelectionPopup(QtWidgets.QDialog):
         self.update_probe_dropdown(probes)
         
         if opt1 == 2:  # prompt user to convert data to new HDF5 format
-            res = gi.MsgboxQuestion('Convert NPZ to HDF5?').exec()
+            res = gi.MsgboxQuestion('Convert NPZ to HDF5?', parent=self).exec()
             if res == QtWidgets.QMessageBox.Yes:
                 self.start_conversion()
                 return
@@ -365,8 +365,9 @@ class ProcessedRecordingSelectionPopup(QtWidgets.QDialog):
         ishank = self.shank_dropdown.currentIndex()
         # load DS dataframe
         DS_DF = ephys.load_ds_dataset(self.ddir, iprb=iprb, ishank=ishank)
-        if DS_DF.empty:
-            gi.MsgboxError('No dentate spikes detected on the hilus channel.').exec()
+        if len(DS_DF) < 2:
+            pref = ['No dentate spikes','Only 1 dentate spike'][len(DS_DF)]
+            gi.MsgboxError(f'{pref} detected on the hilus channel.', parent=self).exec()
             return
         self.ds_classification_dlg = DS_CSDWindow(self.ddir, iprb=iprb, ishank=ishank)
         self.ds_classification_dlg.exec()
