@@ -199,6 +199,35 @@ QLIST = {'QListWidget' : {
                                         }
          }
 
+###   context menu
+
+QMENU = {'QMenu' : {
+                   'border-width'  : '4px',
+                   'border-style'  : 'ridge',
+                   'border-color'  : 'gray',
+                   },
+        
+        'QMenu::item' : {
+                        'padding' : '2px 5px 2px 20px',
+                       },
+
+        'QMenu::item:selected' : {
+                              'background-color' : 'rgba(85,70,160,200)',
+                              'color' : 'white',
+                              },
+        'QMenu::item:disabled' : {
+                              'color' : 'lightgray',
+                              },
+        
+        'QLabel' : {
+                   'background-color' : 'rgb(200,200,200)',
+                   'border-bottom' : '2px solid dimgray',
+                   'border-top' : '2px solid dimgray',
+                   'padding' : '2px',
+                   },
+        'QLabel#top_header' : {'border-top':'none'},
+        }
+
 
 ##############################################################################
 ################             CHANNEL SELECTION GUI            ################
