@@ -18,6 +18,7 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 from matplotlib.ticker import FuncFormatter
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import seaborn as sns
+import warnings
 from copy import deepcopy
 import bisect
 import quantities as pq
@@ -54,6 +55,8 @@ class IFigLFP(QtWidgets.QWidget):
     SHOW_DS_RM = False   # show markers for DSs excluded from dataset
     SHOW_SWR_RM = False  # show markers for ripples excluded from dataset
     
+    edit_events_signal = QtCore.pyqtSignal(str, pd.DataFrame)
+    
     def __init__(self, DATA, lfp_time, lfp_fs, PARAMS, **kwargs):
         super().__init__()
         self.DATA = DATA          # dictionary of raw and filtered LFP signals
@@ -86,6 +89,11 @@ class IFigLFP(QtWidgets.QWidget):
         self.toolbar = NavigationToolbar(self.canvas, self)
         self.toolbar.setOrientation(QtCore.Qt.Vertical)
         self.toolbar.setMaximumWidth(30)
+        for tbtn in self.toolbar.findChildren(QtWidgets.QToolButton):
+            if tbtn.actions()[0].text() == 'Pan':
+                tbtn.setObjectName('Pan')
+            if tbtn.actions()[0].text() == 'Subplots':
+                tbtn.setEnabled(False)
         self.canvas_freq = FigureCanvas(self.fig_freq) # freq plot canvas
         self.canvas_w = FigureCanvas(self.fig_w) # slider canvas
         self.canvas_w.setMaximumHeight(80)
@@ -137,7 +145,7 @@ class IFigLFP(QtWidgets.QWidget):
         # connect slider signals
         self.iw = pd.Series(dict(i=i_sldr, iwin=iwin_sldr, ycoeff=ycoeff_sldr, yfig=yfig_sldr))#, btns=radio_btns))
         self.iw.i.on_changed(self.plot_lfp_data)
-        self.iw.iwin.on_changed(self.plot_lfp_data)
+        self.iw.iwin.on_changed(self.update_iwin)
         self.iw.ycoeff.on_changed(self.plot_lfp_data)
         self.iw.yfig.on_changed(lambda val: self.plot_row.setFixedHeight(int(self.plot_height + val)))
         
@@ -195,6 +203,8 @@ class IFigLFP(QtWidgets.QWidget):
             ### CONTEXT MENU ###
             
             if event.button == matplotlib.backend_bases.MouseButton.RIGHT:
+                if self.toolbar.findChild(QtWidgets.QToolButton, 'Pan').isChecked():
+                    return
                 # get closest channel/timepoint to clicked point
                 ch = -int(round(event.ydata))
                 if ch not in self.shank_channels: return
@@ -210,6 +220,7 @@ class IFigLFP(QtWidgets.QWidget):
                 
                 # create context menu and section headers
                 menu = QtWidgets.QMenu()
+                menu.setStyleSheet(pyfx.dict2ss(QSS.QMENU))
                 headers = []
                 for txt in [f'Time = {tpoint:.2f} s', f'Channel {ch}']:
                     hdr = QtWidgets.QWidgetAction(self)
@@ -217,6 +228,7 @@ class IFigLFP(QtWidgets.QWidget):
                     hdr.setDefaultWidget(lbl)
                     headers.append(hdr)
                 t_hdr, ch_hdr = headers
+                t_hdr.defaultWidget().setObjectName('top_header')
                 
                 ### timepoint section
                 menu.addAction(t_hdr)
@@ -255,33 +267,49 @@ class IFigLFP(QtWidgets.QWidget):
                 opts = [('ds', self.hil_chan, 0.025, self.DS_ALL), 
                         ('swr', self.ripple_chan, 0.1, self.SWR_ALL)]
                 EV, CHAN, WIN, EV_DF = opts[0 if self.ADD_DS else 1]
-                iwin = int(self.lfp_fs * WIN)  # 50ms (DS) or 200ms (SWR) window
-                # filtered LFP for hilus/ripple channel
                 lfp = self.DATA[EV][CHAN]
-                
+                iwin = int(self.lfp_fs * WIN)  # 50ms (DS) or 200ms (SWR) window
+                tmpwin = int(iwin/2) if EV=='swr' else int(iwin)
+                tmpwin0, tmpwin1 = min(idx, tmpwin), min(len(lfp)-idx, tmpwin)
+                tmp = lfp[idx-tmpwin0 : idx+tmpwin1]
+                if EV=='swr': 
+                    tmp = np.abs(scipy.signal.hilbert(tmp)).astype('float32')
+                # get index of peak LFP/envelope amplitude
+                ipk = idx + (np.argmax(tmp) - tmpwin0)
+                if ipk < iwin or ipk > len(lfp)-iwin:
+                    gi.MsgboxError('Too close to recording bounds.', parent=self).exec()
+                    self.span.set_visible(False)
+                    return
+                # get event-filtered and raw LFP within given window
+                filt_lfp = lfp[ipk-iwin : ipk+iwin]
+                raw_lfp = self.DATA['raw'][CHAN][ipk-iwin : ipk+iwin]
+                ddict, error_msg = None, ''
                 if self.ADD_DS:
-                    # get 50ms window surrounding peak index (max filtered LFP amplitude)
-                    ipk = idx + (np.argmax(lfp[idx-iwin : idx+iwin]) - iwin)
-                    ds_lfp = lfp[ipk-iwin : ipk+iwin]
                     # detect peaks
-                    props = scipy.signal.find_peaks(ds_lfp, height=max(ds_lfp), prominence=0)[1]
-                    pws = np.squeeze(scipy.signal.peak_widths(ds_lfp, peaks=[iwin], rel_height=0.5))
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings('ignore', r'some peaks have a prominence of 0')
+                        warnings.filterwarnings('ignore', r'some peaks have a width of 0')
+                        props = scipy.signal.find_peaks(filt_lfp, height=max(filt_lfp), prominence=0)[1]
+                        pws = np.squeeze(scipy.signal.peak_widths(filt_lfp, peaks=[iwin], rel_height=0.5))
                     istart, istop = ipk + (np.round(pws[2:4]).astype('int')-iwin)
-                    ds_raw_lfp = self.DATA['raw'][self.hil_chan][ipk-iwin : ipk+iwin]
-                    imax = ipk + (np.argmax(ds_raw_lfp)-iwin)
-                    ddict = dict(ch=self.hil_chan, time=self.lfp_time[imax], amp=props['peak_heights'][0],
-                                 half_width=(pws[0]/self.lfp_fs)*1000, width_height=pws[1],
-                                 asym=ephys.get_asym(ipk,istart,istop), prom=props['prominences'][0],
-                                 start=self.lfp_time[istart], stop=self.lfp_time[istop],
-                                 idx=imax, idx_peak=ipk, idx_start=istart, idx_stop=istop,
-                                 status=2, is_valid=1, shank=int(self.shank.shank_id))
+                    imax = ipk + (np.argmax(raw_lfp)-iwin)
+                    try:
+                        amp,prom = [props[k][0] for k in ['peak_heights','prominences']]
+                        assert istop > istart
+                        ddict = dict(ch=self.hil_chan, time=self.lfp_time[imax], amp=amp,
+                                     half_width=(pws[0]/self.lfp_fs)*1000, width_height=pws[1],
+                                     asym=ephys.get_asym(ipk,istart,istop), prom=prom,
+                                     start=self.lfp_time[istart], stop=self.lfp_time[istop],
+                                     idx=imax, idx_peak=ipk, idx_start=istart, idx_stop=istop,
+                                     status=2, is_valid=1, shank=int(self.shank.shank_id))
+                    except IndexError:
+                        error_msg = 'Error: No local LFP peak found.'
+                        self.span.set_visible(False)
+                    except AssertionError:
+                        error_msg = 'Detected peak has a width of 0.'
+                        self.span.set_visible(False)
                 elif self.ADD_SWR:
-                    half_win = int(iwin/2)
-                    # get SWR envelope peak in central half of window
-                    tmp = np.abs(scipy.signal.hilbert(lfp[idx-half_win:idx+half_win])).astype('float32')
-                    ipk = idx + (np.argmax(tmp) - half_win)
-                    swr_lfp = lfp[ipk-iwin : ipk+iwin]
-                    hilb = scipy.signal.hilbert(swr_lfp)
+                    hilb = scipy.signal.hilbert(filt_lfp)
                     env = np.abs(hilb).astype('float32')
                     # set thresholds for peak width calculation
                     if self.SWR_THRES is not None:
@@ -292,34 +320,49 @@ class IFigLFP(QtWidgets.QWidget):
                         swr_min = self.PARAMS.swr_min_thr * np.nanstd(env2)
                     env_clip = np.clip(env, swr_min, max(env))
                     # detect peaks
-                    props = scipy.signal.find_peaks(env, height=env[iwin])[1]
-                    pws = np.squeeze(scipy.signal.peak_widths(env_clip, peaks=[iwin], rel_height=1))
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings('ignore', r'some peaks have a prominence of 0')
+                        warnings.filterwarnings('ignore', r'some peaks have a width of 0')
+                        props = scipy.signal.find_peaks(env, height=env[iwin])[1]
+                        pws = np.squeeze(scipy.signal.peak_widths(env_clip, peaks=[iwin], rel_height=1))
                     istart, istop = ipk + (np.round(pws[2:4]).astype('int')-iwin)
                     # find largest oscillation in ripple
                     ampwin = int(round(self.PARAMS.swr_maxamp_win)/1000 * self.lfp_fs)
-                    iosc = (np.argmax(swr_lfp[iwin-ampwin : iwin+ampwin]) + (iwin-ampwin))
+                    iosc = (np.argmax(filt_lfp[iwin-ampwin : iwin+ampwin]) + (iwin-ampwin))
                     imax = ipk + (iosc - iwin)
                     # inst. freq
                     fwin = int(round(self.PARAMS.swr_freq_win/1000 * self.lfp_fs))
                     ifreq = ephys.get_inst_freq(hilb, self.lfp_fs, self.PARAMS.swr_freq)
                     swr_ifreq = np.mean(ifreq[iwin-fwin : iwin+fwin])
+                    try:
+                        assert istop > istart
+                        ddict = dict(ch=self.ripple_chan, time=self.lfp_time[imax], 
+                                     amp=env[iwin], dur=(pws[0]/self.lfp_fs)*1000, freq=swr_ifreq,
+                                     start=self.lfp_time[istart], stop=self.lfp_time[istop],
+                                     idx=imax, idx_peak=ipk, idx_start=istart, idx_stop=istop,
+                                     status=2, is_valid=1, shank=int(self.shank.shank_id))
+                    except AssertionError:
+                        error_msg = 'Detected envelope peak has a width of 0.'
+                        self.span.set_visible(False)
+                if ddict is None:
+                    gi.MsgboxError(error_msg, parent=self).exec()
+                else:
+                    # add freq band power to data row, update n_valid column
+                    ddict.update({**self.STD.loc[CHAN].to_dict(), 'n_valid':0})
+                    ddf = pd.DataFrame(ddict, index=[CHAN])
+                    if EV_DF.empty:
+                        EV_DF = ddf
+                    else:
+                        EV_DF = pd.concat([EV_DF, ddf]).sort_values(['ch','time'])
+                    EV_DF.loc[CHAN, 'n_valid'] = np.atleast_1d(EV_DF.loc[CHAN, 'is_valid']).sum()
+                    if   EV == 'ds' : self.DS_ALL  = EV_DF
+                    elif EV == 'swr': self.SWR_ALL = EV_DF
+                    # update event trains, update event dataframe in main window
+                    print(f'Added {EV.upper()}!')
+                    self.update_event_items(event=EV)
+                    self.edit_events_signal.emit(EV, deepcopy(EV_DF))
+                    self.plot_lfp_data()
                     
-                    ddict = dict(ch=self.ripple_chan, time=self.lfp_time[imax], 
-                                 amp=env[iwin], dur=(pws[0]/self.lfp_fs)*1000, freq=swr_ifreq,
-                                 start=self.lfp_time[istart], stop=self.lfp_time[istop],
-                                 idx=imax, idx_peak=ipk, idx_start=istart, idx_stop=istop,
-                                 status=2, is_valid=1, shank=int(self.shank.shank_id))
-                
-                # add freq band power to data row, update n_valid column
-                ddict.update({**self.STD.loc[CHAN].to_dict(), 'n_valid':0})
-                ddf = pd.DataFrame(ddict, index=[CHAN])
-                EV_DF = pd.concat([EV_DF, ddf]).sort_values(['ch','time'])
-                EV_DF.loc[CHAN, 'n_valid'] = EV_DF.loc[CHAN, 'is_valid'].sum()
-                if   EV == 'ds' : self.DS_ALL  = EV_DF
-                elif EV == 'swr': self.SWR_ALL = EV_DF
-                self.update_event_items(event=EV)
-                self.plot_lfp_data()
-                print(f'Added {EV.upper()}!')
             
         def on_press(event):
             """ Key press events
@@ -329,102 +372,70 @@ class IFigLFP(QtWidgets.QWidget):
             Escape -> Permanently erase event(s) from the dataset
             Enter -> Display CSD heatmap over the selected interval
             """
-            # update current timepoint with arrow keys 
+            ee = {'backspace':'delete',  # exclude events from dataset
+                  'escape'   :'erase',   # permanently erase events
+                  ' '        :'restore'} # restore events
+            
+            ###   SHIFT VIEWING WINDOW   ###
+            
             if event.key   == 'left'  : self.iw.i.key_step(0)  # step backwards
             elif event.key == 'right' : self.iw.i.key_step(1)  # step forwards
             
-            elif event.key in ['backspace', 'escape', ' ', 'enter'] and self.xspan > 0:
+            ###   CURATE EVENT DATASETS   ###
+            
+            elif event.key in ee and self.xspan > 0:
                 # get selected time interval
-                irg = (imin, imax) = list(map(lambda x: int(x*self.lfp_fs), self.span.extents))
+                irg = [*map(lambda x: int(x*self.lfp_fs), self.span.extents)]
+                mode = ee[event.key] # delete/erase/restore
+                ds_kw = {'DF':self.DS_ALL, 'chan':self.hil_chan, 'irange':irg, 'mode':mode}
+                swr_kw = {'DF':self.SWR_ALL, 'chan':self.ripple_chan, 'irange':irg, 'mode':mode}
+                for ev,kw in zip(['ds','swr'],[ds_kw,swr_kw]):
+                    kw['idx'] = self.get_visible_events(ev)
+                    if len(kw['idx']) > 0 and kw['DF'] is not None:
+                        res = self.edit_event_status(**kw)
+                        if res: 
+                            self.update_event_items(event=ev)
+                            self.edit_events_signal.emit(ev, deepcopy(kw['DF']))
+                self.span.set_visible(False)
+                self.plot_lfp_data()
                 
-                ###   PERMANENTLY ERASE EVENTS   ###
+            ###   PLOT INSTANTANEOUS CSD   ###
                 
-                if event.key=='escape':
-                    # delete detected DS events
-                    if self.SHOW_DS:
-                        res = self.edit_event_status(self.DS_ALL, idx=self.DS_valid, irange=irg, 
-                                                     chan=self.hil_chan, mode='erase')
-                        if res:
-                            self.update_event_items(event='ds')
-                    # delete detected SWR events
-                    if self.SHOW_SWR and self.SWR_ALL is not None:
-                        res = self.edit_event_status(self.SWR_ALL, idx=self.SWR_valid, irange=irg, 
-                                                     chan=self.ripple_chan, mode='erase')
-                        if res:
-                            self.update_event_items(event='swr')
-                    self.span.set_visible(False)
-                    self.plot_lfp_data()
+            elif event.key=='enter' and self.xspan > 0 and self.coord_electrode is not None:
+                imin, imax = [*map(lambda x: int(x*self.lfp_fs), self.span.extents)]
+                # plot temporary CSD
+                arr = self.DATA['raw'][self.shank_channels, imin:imax]
+                arr2 = np.array(arr)
+                noise_idx_rel = np.nonzero(self.NOISE_TRAIN[self.shank_channels])[0]
+                clean_idx_rel = np.setdiff1d(np.arange(arr.shape[0]), noise_idx_rel)
+                # replace noisy channels with the average of its two closest neighbors
+                for i in noise_idx_rel:
+                    if i == 0:
+                        interp_sig = np.array(arr[min(clean_idx_rel)])
+                    elif i > max(clean_idx_rel):
+                        interp_sig = np.array(arr[max(clean_idx_rel)])
+                    else:
+                        sig1 = arr[pyfx.Closest(i, clean_idx_rel[clean_idx_rel < i])]
+                        sig2 = arr[pyfx.Closest(i, clean_idx_rel[clean_idx_rel > i])]
+                        interp_sig = np.nanmean([sig1, sig2], axis=0)
+                    arr2[i,:] = interp_sig
+                # calculate CSD
+                csd_obj = ephys.get_csd_obj(arr2, self.coord_electrode, self.PARAMS)
+                csd = ephys.csd_obj2arrs(csd_obj)[1]
+                a,b = pyfx.Edges(self.shank_channels)
+                yax = np.linspace(b+1, a-1,len(csd)) * -1 # (-43,-42...,0,1)
+                csd = csd[::-1, :]  # arrange rows bottom to top to match $yax
+                try:
+                    _ = self.ax.pcolorfast(self.lfp_time[imin:imax], yax, csd, 
+                                           cmap=plt.get_cmap('bwr'))
+                except:
+                    _ = self.ax.pcolorfast(pyfx.Edges(self.lfp_time[imin:imax]), 
+                                                      pyfx.Edges(yax), csd, cmap=plt.get_cmap('bwr'))
+                self.span.set_visible(False)
+                self.canvas.draw_idle()
                 
-                
-                ###   EXCLUDE EVENTS FROM ANALYSIS   ###
-                
-                if event.key=='backspace':
-                    # remove detected DS events
-                    if self.SHOW_DS and self.DS_ALL is not None:
-                        res = self.edit_event_status(self.DS_ALL, idx=self.DS_valid, irange=irg, 
-                                                     chan=self.hil_chan, mode='delete')
-                        if res:
-                            self.update_event_items(event='ds')
-                    # remove detected SWR events
-                    if self.SHOW_SWR and self.SWR_ALL is not None:
-                        res = self.edit_event_status(self.SWR_ALL, idx=self.SWR_valid, irange=irg, 
-                                                     chan=self.ripple_chan, mode='delete')
-                        if res:
-                            self.update_event_items(event='swr')
-                    self.span.set_visible(False)
-                    self.plot_lfp_data()
-                    
-                ###   RESTORE EXCLUDED EVENTS   ###
-                
-                elif event.key==' ':
-                    # replace previously deleted DS events
-                    if self.SHOW_DS and self.SHOW_DS_RM and self.DS_ALL is not None:
-                        res = self.edit_event_status(self.DS_ALL, idx=self.DS_idx, irange=irg, 
-                                                     chan=self.hil_chan, mode='restore')
-                        if res:
-                            self.update_event_items(event='ds')
-                    # replace previously deleted DS events
-                    if self.SHOW_SWR and self.SHOW_SWR_RM and self.SWR_ALL is not None:
-                        res = self.edit_event_status(self.SWR_ALL, idx=self.SWR_idx, irange=irg, 
-                                                     chan=self.ripple_chan, mode='restore')
-                        if res:
-                            self.update_event_items(event='swr')
-                    self.span.set_visible(False)
-                    self.plot_lfp_data()
-                
-                ###   PLOT INSTANTANEOUS CSD   ###
-                
-                elif event.key=='enter' and self.coord_electrode is not None:
-                    # plot temporary CSD
-                    arr = self.DATA['raw'][self.shank_channels, imin:imax]
-                    arr2 = np.array(arr)
-                    noise_idx_rel = np.nonzero(self.NOISE_TRAIN[self.shank_channels])[0]
-                    clean_idx_rel = np.setdiff1d(np.arange(arr.shape[0]), noise_idx_rel)
-                    # replace noisy channels with the average of its two closest neighbors
-                    for i in noise_idx_rel:
-                        if i == 0:
-                            interp_sig = np.array(arr[min(clean_idx_rel)])
-                        elif i > max(clean_idx_rel):
-                            interp_sig = np.array(arr[max(clean_idx_rel)])
-                        else:
-                            sig1 = arr[pyfx.Closest(i, clean_idx_rel[clean_idx_rel < i])]
-                            sig2 = arr[pyfx.Closest(i, clean_idx_rel[clean_idx_rel > i])]
-                            interp_sig = np.nanmean([sig1, sig2], axis=0)
-                        arr2[i,:] = interp_sig
-                    # calculate CSD
-                    csd_obj = ephys.get_csd_obj(arr2, self.coord_electrode, self.PARAMS)
-                    csd = ephys.csd_obj2arrs(csd_obj)[1]
-                    a,b = pyfx.Edges(self.shank_channels)
-                    yax = np.linspace(b+1, a-1,len(csd)) * -1 # (-43,-42...,0,1)
-                    csd = csd[::-1, :]  # arrange rows bottom to top to match $yax
-                    try:
-                        _ = self.ax.pcolorfast(self.lfp_time[imin:imax], yax, csd, 
-                                               cmap=plt.get_cmap('bwr'))
-                    except:
-                        _ = self.ax.pcolorfast(pyfx.Edges(self.lfp_time[imin:imax]), 
-                                                          pyfx.Edges(yax), csd, cmap=plt.get_cmap('bwr'))
-                    self.span.set_visible(False)
-                    self.canvas.draw_idle()
+            ###   CHANGE TIME UNITS   ###
+            
             elif event.key in ['S','M','H']:
                 self.xax_formatter = self.xfmts[event.key]
                 self.xu = event.key.lower()
@@ -434,8 +445,17 @@ class IFigLFP(QtWidgets.QWidget):
                 
         self.cid = self.canvas.mpl_connect("key_press_event", on_press)
         self.cid2 = self.canvas.mpl_connect("button_press_event", on_click)
-        
-        
+    
+    def update_iwin(self, new_iwin):
+        """ Use viewing window bounds to update range of index slider """
+        imin, imax = (new_iwin, len(self.lfp_time)-new_iwin-1)
+        self.iw.i.update_range(imin, imax)
+        i = self.iw.i.val
+        if i < imin or i > imax:
+            self.iw.i.set_val(i)
+        else:
+            self.plot_lfp_data()
+            
     def edit_event_status(self, DF, idx, irange, chan, mode=''):
         """ Delete or restore events within $irange for channel $chan in dataframe $DF """
         # find qualifying indices within range, map to DF rows
@@ -449,7 +469,8 @@ class IFigLFP(QtWidgets.QWidget):
             DF.drop(irows, axis=0, inplace=True)
             DF.set_index('index', inplace=True)
             DF.index.name = None
-            DF.loc[chan, 'n_valid'] = DF.loc[chan, 'is_valid'].sum()
+            if chan in DF.index:
+                DF.loc[chan, 'n_valid'] = DF.loc[chan, 'is_valid'].sum()
             print(f'Permanently erased {len(irows)} event(s)!')
             return True
         # set status negative (1>>-1, -1>>-1) or positive (1>>1, -1>>1)
@@ -567,21 +588,20 @@ class IFigLFP(QtWidgets.QWidget):
         3) User adds or removes an event instance
         """
         if (event in ['all','ds']) and (self.DS_ALL is not None):
+            self.DS_train[:] = 0
             DS_DF = self.DS_ALL[self.DS_ALL.ch == self.hil_chan]
             # valid events are either 1) auto-detected and non-user-removed or 2) user-added
-            self.DS_idx = DS_DF.idx.values
-            self.DS_valid = DS_DF[DS_DF['is_valid'] == 1].idx.values
-            self.DS_train[:] = 0
-            # 1=auto-detected; 2=user-added; -1=user-removed
-            self.DS_train[DS_DF['idx'].values] = DS_DF['status'].values
+            self.DS_idx, DS_status = np.array(DS_DF[['idx','status']], dtype='int').T
+            self.DS_train[self.DS_idx] = DS_status # 1=auto-detected; 2=user-added; -1=user-removed
+            self.DS_valid = np.array(DS_DF[DS_DF['is_valid']==1].idx, dtype='int')
         
         if (event in ['all','swr']) and (self.SWR_ALL is not None):
-            SWR_DF = self.SWR_ALL[self.SWR_ALL.ch == self.ripple_chan]
-            self.SWR_idx = SWR_DF.idx.values
-            self.SWR_valid = SWR_DF[SWR_DF['is_valid'] == 1].idx.values
             self.SWR_train[:] = 0
-            self.SWR_train[SWR_DF['idx'].values] = SWR_DF['status'].values
-        
+            SWR_DF = self.SWR_ALL[self.SWR_ALL.ch == self.ripple_chan]
+            self.SWR_idx, SWR_status = np.array(SWR_DF[['idx','status']], dtype='int').T
+            self.SWR_train[self.SWR_idx] = SWR_status # 1=auto-detected; 2=user-added; -1=user-removed
+            self.SWR_valid = np.array(SWR_DF[SWR_DF['is_valid']==1].idx, dtype='int')
+            
     def channel_changed(self, theta_chan, ripple_chan, hil_chan):
         """ Update currently selected event channels """
         self.event_channels = [theta_chan, ripple_chan, hil_chan]
@@ -589,14 +609,26 @@ class IFigLFP(QtWidgets.QWidget):
         self.ch_cmap = self.ch_cmap.set_axis(self.event_channels)
         self.update_event_items()  # set DS/SWR indices for new channel
         self.plot_lfp_data()
+        
+    def get_visible_events(self, event):
+        """ Get event instances with visible plot markers """
+        if event == 'ds':
+            if not self.SHOW_DS: # all events hidden from plot
+                return np.array([], dtype='int')
+            if not self.SHOW_DS_RM: # excluded events hidden from plot
+                return self.DS_valid
+            return self.DS_idx # all events visible
+        elif event == 'swr':
+            if not self.SHOW_SWR:
+                return np.array([], dtype='int')
+            if not self.SHOW_SWR_RM:
+                return self.SWR_valid
+            return self.SWR_idx
     
     def event_jump(self, sign, event):
         """ Set plot index to the next (or previous) instance of a given event """
         # get idx for given event type, return if empty
-        if event == 'ds':
-            idx = self.DS_idx if self.SHOW_DS_RM else self.DS_valid
-        elif event == 'swr': 
-            idx = self.SWR_idx if self.SHOW_SWR_RM else self.SWR_valid
+        idx = self.get_visible_events(event)
         if len(idx) == 0: return
         # find nearest event preceding (sign==0) or following (1) current idx
         i = self.iw.i.val
@@ -647,13 +679,15 @@ class IFigLFP(QtWidgets.QWidget):
                 elif self.SHOW_DS_RM:
                     self.ax.axvline(ds_time, ls='--', **linekw)
         if self.SHOW_SWR:
-            swr_times = x[np.where(self.SWR_train[idx] > 0)[0]]
-            for swrt in swr_times:
-                self.ax.axvline(swrt, color='green', zorder=-5, alpha=0.4)
-            if self.SHOW_SWR_RM:
-                swr_rm_times = x[np.where(self.SWR_train[idx] < 0)[0]]
-                for swrrt in swr_rm_times:
-                    self.ax.axvline(swrrt, color='green', ls='--', zorder=-5, alpha=0.4)
+            swr_ii = np.where(self.SWR_train[idx] != 0)[0]
+            linekw = dict(color='green', lw=2, zorder=5, alpha=0.4)
+            for swr_time, status in zip(x[swr_ii], self.SWR_train[idx][swr_ii]):
+                if status == 1:
+                    self.ax.axvline(swr_time, **linekw)
+                elif status == 2:
+                    self.ax.axvline(swr_time, ls=':', **linekw)
+                elif self.SHOW_SWR_RM:
+                    self.ax.axvline(swr_time, ls='--', **linekw)
         
         if self.canvas_freq.isVisible():
             self.plot_freq_band_pwr()
@@ -670,7 +704,7 @@ class IFigLFP(QtWidgets.QWidget):
     def closeEvent(self, event):
         """ Close plots """
         plt.close()
-        event.accept()
+        super().closeEvent(event)
         
         
 class IFigEvent(QtWidgets.QWidget):
@@ -742,6 +776,9 @@ class IFigEvent(QtWidgets.QWidget):
         self.toolbar = NavigationToolbar(self.canvas, self)
         self.toolbar.setOrientation(QtCore.Qt.Vertical)
         self.toolbar.setMaximumWidth(30)
+        for tbtn in self.toolbar.findChildren(QtWidgets.QToolButton):
+            if tbtn.actions()[0].text() == 'Pan':
+                tbtn.setObjectName('Pan')
         self.layout = QtWidgets.QHBoxLayout(self)
         self.layout.setContentsMargins(0,0,0,0)
         self.layout.addWidget(self.toolbar, stretch=0)
@@ -810,7 +847,7 @@ class IFigEvent(QtWidgets.QWidget):
         # create sliders for scaling/navigation
         twin_kw = dict(valmin=.01, valmax=0.5, valstep=.01, valfmt='%.2f s', valinit=twin)
         ywin_kw = dict(valmin=-0.5, valmax=1, valstep=0.05, valfmt='%.2f', valinit=0)
-        idx_kw = dict(valmin=0, valmax=len(self.iev)-1, valstep=1, valinit=0, 
+        idx_kw = dict(valmin=0, valmax=max(len(self.iev)-1,1), valstep=1, valinit=0, 
                    valfmt='%.0f%% / ' + str(len(self.iev)-1))
         
         twin_sldr = gi.MainSlider(self.axs['sax0'], 'X', **twin_kw)
@@ -849,8 +886,12 @@ class IFigEvent(QtWidgets.QWidget):
             """ Copy index of individual waveforms to view in main window """
             if event.xdata is None: return
             if event.button == matplotlib.backend_bases.MouseButton.RIGHT:
+                if event.inaxes != self.ax: return
                 if self.FLAG == 0: return
+                if self.toolbar.findChild(QtWidgets.QToolButton, 'Pan').isChecked():
+                    return
                 menu = QtWidgets.QMenu()
+                menu.setStyleSheet(pyfx.dict2ss(QSS.QMENU))
                 # copy timestamp or recording index to clipboard
                 copyTAction = menu.addAction('Copy time point')
                 copyIAction = menu.addAction('Copy index')
@@ -893,6 +934,8 @@ class IFigEvent(QtWidgets.QWidget):
         elif self.FLAG == 1:
             self.EY = pyfx.Limit(ephys.getwaves(self.LFP, self.iev, self.iwin).flatten(), pad=0.05)
         ylim = pyfx.Limit(self.EY, pad=np.abs(self.iw.ywin.val), sign=np.sign(self.iw.ywin.val))
+        if len(np.unique(ylim)) == 1:
+            ylim = tuple(np.array(ylim) + (np.array(ylim) * 0.1 * np.array([-1,1])))
         self.ax.set_ylim(ylim)
         
         
@@ -1187,7 +1230,10 @@ class IFigDS(IFigEvent):
             # run scipy.signal peak detection on mean waveform
             ipk = np.argmax(self.ev_y)
             wlen = int(round(self.lfp_fs * self.PARAMS['ds_wlen']))
-            pws = scipy.signal.peak_widths(self.ev_y, peaks=[ipk], rel_height=0.5, wlen=wlen)
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore', r'some peaks have a prominence of 0')
+                warnings.filterwarnings('ignore', r'some peaks have a width of 0')
+                pws = scipy.signal.peak_widths(self.ev_y, peaks=[ipk], rel_height=0.5, wlen=wlen)
             hw, wh, istart, istop = np.array(pws).flatten()
             
             # plot mean half-width for primary channel
@@ -1232,7 +1278,7 @@ class EventViewPopup(QtWidgets.QDialog):
         
         # initialize settings widget, populate channel dropdown
         self.evw = EventViewWidget(self.DF_ALL.columns, parent=self)
-        self.evw.setMaximumWidth(200)
+        self.evw.setMaximumWidth(300)
         self.reset_ch_dropdown()
         
         self.layout = QtWidgets.QHBoxLayout()
@@ -1281,7 +1327,6 @@ class EventViewPopup(QtWidgets.QDialog):
             self.event_fig.yax_line.set_visible(chk)
         
         self.event_fig.plot_event_data(event=None)
-        #self.event_fig.plot_event_data(self.event_fig.iw.idx.val, self.event_fig.iw.twin.val)
         
         
     def toggle_plot_mode(self, btn, chk):
@@ -1291,11 +1336,11 @@ class EventViewPopup(QtWidgets.QDialog):
         mode = btn.group().id(btn)  # 0=average waveform, 1=individual events
         self.event_fig.FLAG = mode
         self.event_fig.rescale_y()
-        self.event_fig.plot_event_data(event=None)#(self.event_fig.iw.idx.val, self.event_fig.iw.twin.val)
-        
-        self.event_fig.iw.idx.set_active(bool(mode))    # slider active if mode==1
-        self.event_fig.iw.idx.enable(bool(mode))
-        self.evw.sort_gbox.setEnabled(bool(mode)) # sort options enabled if mode==1
+        self.event_fig.plot_event_data(event=None)
+        iiterable = bool(mode and len(self.event_fig.iev)>1)
+        self.event_fig.iw.idx.set_active(iiterable)    # slider active if mode==1
+        self.event_fig.iw.idx.enable(iiterable)
+        self.evw.sort_gbox.setEnabled(iiterable) # sort options enabled if mode==1
         self.evw.ch_comp_widget.setEnabled(not bool(mode))  # channel comparison disabled if mode==1
         
     
@@ -1308,9 +1353,13 @@ class EventViewPopup(QtWidgets.QDialog):
         # repopulate dropdown with all channels, then remove primary channel
         channel_strings = list(np.array(self.channels, dtype='str'))
         self.evw.ch_comp_widget.ch_dropdown.addItems(channel_strings)
-        for idx in np.setdiff1d(self.event_fig.channels, np.unique(self.event_fig.DF_ALL.ch)):
-            self.evw.ch_comp_widget.ch_dropdown.model().item(idx).setEnabled(False)  # disable items of channels with no events
-        self.evw.ch_comp_widget.ch_dropdown.removeItem(self.ch)
+        ch_no_events = np.setdiff1d(self.event_fig.channels, np.unique(self.event_fig.DF_ALL.ch))
+        model = self.evw.ch_comp_widget.ch_dropdown.model()
+        for i,ch in enumerate(self.event_fig.channels):
+            if ch in ch_no_events:
+                model.item(i).setEnabled(False)  # disable items of channels with no events
+        ich = channel_strings.index(str(self.ch))
+        self.evw.ch_comp_widget.ch_dropdown.removeItem(ich)
         display_ch = str(self.ch-1) if self.ch > 0 else str(self.ch+1)
         self.evw.ch_comp_widget.ch_dropdown.setCurrentText(display_ch)
         
@@ -1342,12 +1391,12 @@ class EventViewPopup(QtWidgets.QDialog):
     
     def closeEvent(self, event):
         plt.close()
-        event.accept()
+        super().closeEvent(event)
         
     
 class EventViewWidget(QtWidgets.QFrame):
     """ Settings widget for popup event window """
-    sort_labels = pd.Series(dict(time         = 'Time',
+    sort_labels = pd.Series(dict(time          = 'Time',
                                   amp          = 'Amplitude',
                                   dur          = 'Duration',
                                   freq         = 'Instantaneous freq',
@@ -1483,7 +1532,7 @@ class EventViewWidget(QtWidgets.QFrame):
 
 class ChannelSelectionWidget(QtWidgets.QFrame):
     """ Settings widget for main analysis GUI """
-    ch_signal = QtCore.pyqtSignal(int, int, int)  # user changed event channel
+    
     noise_signal = QtCore.pyqtSignal(np.ndarray)  # user changed noise channels
     
     def __init__(self, ddir, ntimes, lfp_time, lfp_fs, event_channels, parent=None):
@@ -1698,7 +1747,7 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         # save changes
         bbox = QtWidgets.QVBoxLayout()
         bbox.setSpacing(2)
-        self.save_btn = QtWidgets.QPushButton('  Save channels  ')
+        self.save_btn = QtWidgets.QPushButton('  Save  ')
         self.save_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_DialogSaveButton))
         self.save_btn.setLayoutDirection(QtCore.Qt.RightToLeft)
         self.save_btn.setStyleSheet('QPushButton {padding : 5px 20px;}')
@@ -1718,12 +1767,6 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         pyfx.stealthy(self.theta_input, theta_chan)
         pyfx.stealthy(self.swr_input, ripple_chan)
         pyfx.stealthy(self.hil_input, hil_chan)
-    
-    def emit_ch_signal(self):
-        """ Emit signal with all 3 current event channels """
-        event_channels = [int(item.value()) for item in self.ch_inputs]
-        self.ch_signal.emit(*event_channels)
-        #self.disable_event_noise()
     
     def get_item_channels(self, qwidget):
         """ Get all items in a QListWidget or a QComboBox
@@ -1835,6 +1878,8 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
 class ChannelSelectionWindow(QtWidgets.QDialog):
     """ Main channel selection GUI """
     
+    ch_signal = QtCore.pyqtSignal(int, int, int)  # user changed event channel
+    
     def __init__(self, ddir, iprb=0, ishank=0, parent=None):
         super().__init__(parent)
         qrect = pyfx.ScreenRect(perc_width=0.9)
@@ -1939,10 +1984,6 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         
     def SWITCH_THE_PROBE(self, idx):
         """ Update main plot and sidebar with a different probe """
-        # save dataframe with added/removed events
-        self.swr_list[self.iprb] = pd.DataFrame(self.main_fig.SWR_ALL)
-        self.ds_list[self.iprb]  = pd.DataFrame(self.main_fig.DS_ALL)
-        
         self.load_probe_data(idx, ishank=0)
         kwargs = dict(shank=self.shank, DATA=self.DATA, event_channels=self.event_channels, 
                       DS_ALL=self.DS_ALL, SWR_ALL=self.SWR_ALL, STD=self.STD, 
@@ -1981,7 +2022,7 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         # create channel selection widget, initialize values
         self.widget = ChannelSelectionWidget(self.ddir, self.NTS, self.lfp_time, self.lfp_fs, self.event_channels)
         self.widget.setStyleSheet('QWidget:focus {outline : none;}')
-        self.widget.setMaximumWidth(250)
+        self.widget.setMaximumWidth(300)
         self.widget.tab_widget.setCurrentIndex(0)
         
         # update probe list in settings widget
@@ -2013,8 +2054,8 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         self.widget.shanks_qlist.currentRowChanged.connect(self.SWITCH_THE_SHANK)
         # updated event channel inputs
         for item in self.widget.ch_inputs:
-            item.valueChanged.connect(self.widget.emit_ch_signal)
-        self.widget.ch_signal.connect(self.update_event_channels)
+            item.valueChanged.connect(self.emit_ch_signal)
+        self.ch_signal.connect(self.update_event_channels)
         # reset event channels to auto
         self.widget.theta_reset.clicked.connect(lambda x: self.reset_ch('theta'))
         self.widget.swr_reset.clicked.connect(lambda x: self.reset_ch('swr'))
@@ -2049,6 +2090,35 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         self.widget.save_btn.clicked.connect(self.save_channels)
         self.widget.debug_btn.clicked.connect(self.debug)
         self.widget.probes_qlist.setFocus(True)
+        # update event datasets
+        self.main_fig.edit_events_signal.connect(self.edit_events_slot)
+        
+    def emit_ch_signal(self, new_chan):
+        """ Emit signal with all 3 current event channels """
+        event_channels = [int(item.value()) for item in self.widget.ch_inputs]
+        shank_channels = self.shank.get_indices()
+        clean_ch = shank_channels[np.where(self.NOISE_TRAIN[shank_channels]==0)[0]]
+        ichanged = event_channels.index(new_chan)
+        prev_chan = int(self.event_channels[ichanged])
+        if new_chan not in clean_ch: # prevent user from selecting noisy channel
+            distances = [*map(lambda x:abs(x-new_chan), clean_ch)]
+            closest_ch = clean_ch[np.where(distances==np.min(distances))[0]]
+            if len(closest_ch)==2:
+                closest_ch = [closest_ch[max(np.sign(new_chan-prev_chan), 0)]]
+            event_channels[ichanged] = int(closest_ch[0])
+            pyfx.stealthy(self.widget.ch_inputs[ichanged], int(closest_ch[0]))
+        self.ch_signal.emit(*event_channels)
+        self.widget.disable_event_noise()
+    
+    @QtCore.pyqtSlot(str, pd.DataFrame)
+    def edit_events_slot(self, event, DF_ALL):
+        """ Update event dataset from user input """
+        if event == 'ds':
+            self.ds_list[self.iprb] = DF_ALL
+            self.DS_ALL = self.ds_list[self.iprb]
+        elif event == 'swr':
+            self.swr_list[self.iprb] = DF_ALL
+            self.SWR_ALL = self.swr_list[self.iprb]
     
     def toggle_event_add(self, chk, event):
         """ Choose whether to add DS or SWR event on double-click """
@@ -2069,7 +2139,6 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         self.main_fig.SHOW_DS_RM = bool(show_ds_rm)
         self.main_fig.SHOW_SWR = bool(show_swr)
         self.main_fig.SHOW_SWR_RM = bool(show_swr_rm)
-        
         self.widget.ds_arrows.setEnabled(show_ds)
         if not show_ds: self.widget.ds_add.setChecked(False)
         self.widget.ds_add.setEnabled(show_ds)
@@ -2139,6 +2208,8 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
             self.swr_popup.evw.view_gbox.setEnabled(False)
             self.swr_popup.evw.data_gbox.setEnabled(False)
             self.swr_popup.evw.sort_gbox.setEnabled(False)
+            self.swr_fig.iw.twin.enable(False)
+            self.swr_fig.iw.ywin.enable(False)
         self.swr_popup.show()
     
     def view_ds(self):
@@ -2170,15 +2241,13 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
             self.ds_popup.evw.view_gbox.setEnabled(False)
             self.ds_popup.evw.data_gbox.setEnabled(False)
             self.ds_popup.evw.sort_gbox.setEnabled(False)
+            self.ds_fig.iw.twin.enable(False)
+            self.ds_fig.iw.ywin.enable(False)
         self.ds_popup.show()
     
     def save_channels(self):
         """ Save event channels, datasets, and noise channels for current probe/shank """
         # save event dataframes for the current probe
-        self.swr_list[self.iprb] = pd.DataFrame(self.main_fig.SWR_ALL)
-        self.ds_list[self.iprb]  = pd.DataFrame(self.main_fig.DS_ALL)
-        self.SWR_ALL = pd.DataFrame(self.swr_list[self.iprb])
-        self.DS_ALL  = pd.DataFrame(self.ds_list[self.iprb])
         if self.FF is not None:
             ephys.save_h5_df(self.SWR_ALL.drop('ch', axis=1), self.FF, name='ALL_SWR', iprb=self.iprb)
             ephys.save_h5_df(self.DS_ALL.drop('ch', axis=1), self.FF, name='ALL_DS', iprb=self.iprb)
@@ -2194,26 +2263,21 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         ephys.save_event_channels(self.ddir, iprb=self.iprb, ishank=self.ishank, 
                                   new_channels=event_channels)
         
-        # update saved ripple/DS event dataframes with current datasets
-        probe_event_channels = ephys.load_event_channels(self.ddir, iprb=self.iprb)
-        PROBE_DS_ALL, PROBE_SWR_ALL = pd.DataFrame(), pd.DataFrame()
-        for ishank,llist in enumerate(probe_event_channels):
-            if llist == [None,None,None]:
-                continue
-            _, ripple_chan, hil_chan = llist
-            if hil_chan in self.DS_ALL.ch:
-                DS_DF = pd.DataFrame(self.DS_ALL.loc[hil_chan])
-                DS_DF['shank'] = ishank
-                PROBE_DS_ALL = pd.concat([PROBE_DS_ALL, DS_DF], axis=0, ignore_index=True)
-            if ripple_chan in self.SWR_ALL.ch:
-                SWR_DF = pd.DataFrame(self.SWR_ALL.loc[ripple_chan])
-                SWR_DF['shank'] = ishank
-                PROBE_SWR_ALL = pd.concat([PROBE_SWR_ALL, SWR_DF], axis=0, ignore_index=True)
-        PROBE_DS_ALL.to_csv(Path(self.ddir, f'DS_DF_{self.iprb}'), index_label=False)
-        PROBE_SWR_ALL.to_csv(Path(self.ddir, f'SWR_DF_{self.iprb}'), index_label=False)
+        # save ripple/DS event dataframes
+        theta_chan, ripple_chan, hil_chan = event_channels
+        if hil_chan in self.DS_ALL.ch:
+            DS_DF = pd.DataFrame(self.DS_ALL.loc[hil_chan])
+        else:
+            DS_DF = pd.DataFrame(columns=self.DS_ALL.columns)
+        DS_DF.to_csv(Path(self.ddir, f'DS_DF_probe{self.iprb}-shank{self.ishank}'), index_label=False)
+        if ripple_chan in self.SWR_ALL.ch:
+            SWR_DF = pd.DataFrame(self.SWR_ALL.loc[ripple_chan])
+        else:
+            SWR_DF = pd.DataFrame(columns=self.SWR_ALL.columns)
+        SWR_DF.to_csv(Path(self.ddir, f'SWR_DF_probe{self.iprb}-shank{self.ishank}'), index_label=False)
         
         # pop-up messagebox appears when save is complete
-        res = gi.MsgboxSave('Event channels saved!\nExit window?').exec()
+        res = gi.MsgboxSave('Event channels saved!\nExit window?', parent=self).exec()
         if res == QtWidgets.QMessageBox.Yes:
             self.widget.export_notes()  # automatically save notes
             self.accept()
@@ -2226,7 +2290,7 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
             return True  # continue closing
         else:
             msg = 'Save changes to your notes?'
-            res = gi.MsgboxWarning.unsaved_changes_warning(msg=msg, sub_msg='')
+            res = gi.MsgboxWarning.unsaved_changes_warning(msg=msg, sub_msg='', parent=self)
             if res == False:
                 return False  # "Cancel" to abort closing attempt
             else:
@@ -2235,6 +2299,7 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
                 return True   # close dialog
         
     def reject(self):
+        """ Close window without saving changes """
         if self.check_unsaved_notes():
             super().reject()
     
@@ -2242,7 +2307,7 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         plt.close()
         if self.FF is not None:
             self.FF.close()
-        event.accept()
+        super().closeEvent(event)
     
     def debug(self):
         pdb.set_trace()
