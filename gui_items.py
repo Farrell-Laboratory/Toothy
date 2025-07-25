@@ -1278,17 +1278,17 @@ class SpinnerWindow(QtWidgets.QWidget):
                                          'border : 2px double darkblue;'
                                          'border-radius : 8px;'
                                          'color : darkblue;'
-                                         'font-size : 12pt;'
+                                         'font-size : 10pt;'
                                          'font-weight : 900;'
-                                         'padding : 5px'
+                                         'padding : 3px'
                                          '}')
-        self.spinner_label.setFixedSize(int(self.spinner.width()*2), int(self.spinner.height()*0.75))
+        self.spinner_label.setFixedSize(int(self.spinner.width()*2.5), int(self.spinner.height()*1.25))
         # add label and spinner to layout, set size
         if show_label:
             self.layout.addWidget(self.spinner_label, alignment=QtCore.Qt.AlignHCenter)
         self.layout.addWidget(self.spinner_widget)
         self.setLayout(self.layout)
-        self.setFixedSize(int(self.spinner.width()*2), int(self.spinner.height()*2))
+        self.setFixedSize(int(self.spinner.width()*3), int(self.spinner.height()*2))
         self.hide()
     
     def adjust_labelSize(self, lw=2, lh=0.75, ww=2, wh=2):
