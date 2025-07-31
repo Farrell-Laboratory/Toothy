@@ -838,7 +838,7 @@ class DS_CSDWindow(QtWidgets.QDialog):
             # save PCA values and classification with the dataset
             self.DS_DF.to_hdf(gg.filename, key=f'{K}/DS_DF')
             gg[K].attrs.update(self.CSD_PARAMS)  # save params
-        self.DS_DF.to_csv(Path(self.ddir, f'DS_DF_probe{self.iprb}-shank{self.ishank}'))
+        self.DS_DF.to_csv(Path(self.ddir, f'DS_DF_probe{self.iprb}-shank{self.ishank}'), index_label=False)
         # pop-up messagebox appears when save is complete
         res = gi.MsgboxSave('CSD data saved!\nExit window?').exec()
         if res == QtWidgets.QMessageBox.Yes:
@@ -854,7 +854,7 @@ class DS_CSDWindow(QtWidgets.QDialog):
         with h5py.File(Path(self.ddir, 'CSDs.hdf5'), 'r+') as gg:
             self.DS_DF.to_hdf(gg.filename, key=f'{K}/DS_DF')
             gg[K].attrs['clus_algo'] = str(self.CSD_PARAMS['clus_algo'])
-        self.DS_DF.to_csv(Path(self.ddir, f'DS_DF_probe{self.iprb}-shank{self.ishank}'))
+        self.DS_DF.to_csv(Path(self.ddir, f'DS_DF_probe{self.iprb}-shank{self.ishank}'), index_label=False)
         msgbox = gi.MsgboxSave('Current DS classification saved to file!')
         msgbox.setStandardButtons(QtWidgets.QMessageBox.Ok)
         msgbox.exec()
