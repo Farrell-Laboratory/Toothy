@@ -322,10 +322,10 @@ The <i><ins>CSD slider</ins></i> controls the range of the CSD window (cyan), wh
 # Convenience
 The following sections provide helpful "convenience" interfaces that you can optionally use to make your Toothy workflow smoother: (1) Setting paths for file searching, (2) Setting parameters, and (3) Creating probe configuration files. All three of these features are also built-in to the normal Toothy workflow.
 
-### <ins>Set paths</ins>
+## <ins>Set paths</ins>
 The "Set paths" window allows users to point Toothy towards default folders and files for data analysis. This information is stored in a ```default_folders.txt``` file, which is automatically generated the first time Toothy is run.
 
-<p align="center"><img src="_img/new_set_paths.png" width=50%/></p>
+<p align="center"><img src="_img/new_set_paths.png" width=40%/></p>
 
 <b><ins>Input data directory</ins>:</b> Select the directory where your recordings are stored; the first time you run Toothy, this will be set to the Toothy folder itself. Updating this location is optional but may make your workflow more convenient when selecting a recording for initial processing.
 
@@ -339,16 +339,16 @@ The "Set paths" window allows users to point Toothy towards default folders and 
 
 ---
 
-### <ins>Set the analysis parameters</ins>
-The "Parameters" window allows users to view and edit the parameters used for data processing and analysis, which are stored in the TXT file specified in the previous step.
+## <ins>Set the analysis parameters</ins>
+The "Set paramters" window allows users to view and edit the parameters used for data processing and analysis, which are stored in the TXT file specified in the previous step.
 
-<p align="center"><img src="_img/parameters.png" width=35%/></p>
+<p align="center"><img src="_img/new_parameters.png" width=35%/></p>
 
 A short description of each parameter can be displayed by hovering over its label, and changes can be saved either to the current parameter file or as a new TXT file.
 
 <br>
 
-# Probe Creation
+## Probe Creation
 
 The probe designer uses the ```probeinterface``` Python package to create a software representation of the electrode geometry and channel mapping of specific neural probes, which is stored as a JSON file. The <b>"Build"</b> window can be used to create a probe completely from scratch by specifying number of channels and electrode geometry, while the <b>"Paste"</b> window accepts input lists of x and y-coordinates.
 
