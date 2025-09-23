@@ -35,7 +35,7 @@ python toothy.py
 # Getting Started
 The Toothy workflow consists of three key steps: (1) **data ingestion**, in which you select a recording and relevant metadata, (2) **channel selection**, in which you pick the best channel for hippocampal events based on the properties of the events detected on each channel, and (3) **DS classification**, in which you set clustering parameters to classify DSs into DS1/DS2. To begin, click "Step 1: Load data" on the Toothy home screen.
 
-<p align="center"><img align="right", src="_img/new_homepage.png" width=40%/></p>
+<p align="center"><img src="_img/new_homepage.png" width=35%/></p>
 
 # Data Ingestion
 
