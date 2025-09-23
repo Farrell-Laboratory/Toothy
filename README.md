@@ -1,26 +1,31 @@
 # Toothy: a graphical user interface for curating dentate spikes
 
 # Installation
-1) Download Miniconda or Anaconda Navigator
+**1) Download Miniconda or Anaconda Navigator**
 * Miniconda: https://docs.anaconda.com/miniconda/miniconda-install/
 * Anaconda Navigator: https://www.anaconda.com/download
   * Navigator provides a GUI and a large suite of packages/applications, but takes up much more disk space
 
-2) Download the Toothy ZIP file from GitHub and move the folder to the desired location
+**2) Download the Toothy repository as a ZIP file from GitHub. Unpack the ZIP to create a folder, referred to below as the "Toothy folder."**
 
-3) Open an Anaconda Prompt terminal window and set the current directory to the Toothy folder
+**3) Open an Anaconda Prompt terminal window and navigate to the Toothy folder.**
 ```
 cd [PATH_TO_TOOTHY_FOLDER]
 ```
-* e.g. ```cd C:\Users\Amanda Schott\Documents\Data\Toothy-main```
+* e.g. ```cd C:\User\Documents\Data\Toothy-main```
 
-6) Create a new Anaconda environment for the Toothy application using the provided ```environment.yml``` file, then activate the new environment
+**4) Create a new Anaconda environment for the Toothy application using the provided ```environment.yml``` file. The following command creates a Python 3.11 environment called "toothy_env"  and installs all the necessary dependencies.**
 ```
 conda env create -f environment.yml
-conda activate toothy_gui_env
+```
+*If you already have an environment called `toothy_env`, remove it first by running: `conda remove --name toothy_env --all`*
+
+**5) Activate the environment.**
+```
+conda activate toothy_env
 ```
 
-7) Run the application!
+**7) Run the application!**
 ```
 python toothy.py
 ```
