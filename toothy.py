@@ -117,7 +117,7 @@ class toothy(QtWidgets.QMainWindow):
                              QtWidgets.QSizePolicy.Fixed)
 
         # Create buttons for main event detection pipeline
-        self.process_btn = QtWidgets.QPushButton('Step 1: Process data')
+        self.process_btn = QtWidgets.QPushButton('Step 1: Load data')
         self.analyze_btn = QtWidgets.QPushButton('Step 2: Analyze events')
 
         # Create buttons for convenience functions
