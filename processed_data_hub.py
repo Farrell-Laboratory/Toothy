@@ -33,110 +33,111 @@ from ds_classification_gui import DS_CSDWindow
 ##############################################################################
 
 
-class ConverterBot(QtCore.QObject):
-    """ Converts recording folder from previous (NPZ/NPY) to current (HDF5) format """
-    progress_signal = QtCore.pyqtSignal(str)
-    data_signal = QtCore.pyqtSignal(list)
-    finished = QtCore.pyqtSignal()
+# TODO remove
+# class ConverterBot(QtCore.QObject):
+#     """ Converts recording folder from previous (NPZ/NPY) to current (HDF5) format """
+#     progress_signal = QtCore.pyqtSignal(str)
+#     data_signal = QtCore.pyqtSignal(list)
+#     finished = QtCore.pyqtSignal()
     
-    ddir = None
-    transferred = []  # store names of converted files
+#     ddir = None
+#     transferred = []  # store names of converted files
     
-    def run(self):
-        """ Organize recording data in HDF5 files """
-        ddir = self.ddir
-        ff = h5py.File(Path(ddir, 'DATA.hdf5'), 'w', track_order=True)
-        probes = ephys.read_probe_group(ddir).probes
-        # convert LFP timestamps and sampling rate
-        if 'lfp_time.npy' in os.listdir(ddir):
-            self.report_progress('lfp_time.npy')
-            ff.create_dataset('lfp_time', data=np.load(Path(ddir, 'lfp_time.npy')))
-        if  'lfp_fs.npy' in os.listdir(ddir):
-            self.report_progress('lfp_fs.npy')
-            ff.attrs['lfp_fs'] = int(np.load(Path(ddir, 'lfp_fs.npy')))
-        # convert bandpass-filtered LFP signals and summary stats table
-        if 'lfp_bp.npz' in os.listdir(ddir):
-            self.report_progress('lfp_bp.npz')
-            npz = np.load(Path(ddir, 'lfp_bp.npz'), allow_pickle=True, mmap_mode='r')
-            for iprb in range(len(probes)):
-                PROBE_DSET = ff.create_group(str(iprb), track_order=True)
-                PROBE_LFPS = PROBE_DSET.create_group('LFP', track_order=True)
-                for k in npz.keys():
-                    PROBE_LFPS.create_dataset(k, data=npz[k][iprb])
-            npz.close()
-        if 'channel_bp_std' in os.listdir(ddir):
-            self.report_progress('channel_bp_std')
-            STD_list = ephys.csv2list(ddir, 'channel_bp_std')
-            for iprb,STD in enumerate(STD_list):
-                STD.to_hdf(ff.filename, key=f'/{iprb}/STD')
-        # convert ripple and DS event dataframes
-        for fname in ['ALL_SWR','ALL_DS']:
-            if fname in os.listdir(ddir):
-                self.report_progress(fname)
-                DF_list = ephys.csv2list(ddir, fname)
-                for iprb,DF in enumerate(DF_list):
-                    if not 'shank' in DF.columns:
-                        DF['shank'] = pd.Series(probes[iprb].shank_ids.astype('int'))
-                    DF.to_hdf(ff.filename, key=f'/{iprb}/{fname}')
-        if 'THRESHOLDS.npy' in os.listdir(ddir):  # convert detection thresholds
-            self.report_progress('THRESHOLDS.npy')
-            threshold_list = list(np.load(Path(ddir, 'THRESHOLDS.npy'), allow_pickle=True))
-            for iprb, thres_dict in enumerate(threshold_list):
-                for k,v in thres_dict.items():
-                    thres_df = pd.DataFrame(v).T
-                    thres_df.to_hdf(ff.filename, key=f'/{iprb}/{k}_THRES')
-        if 'noise_channels.npy' in os.listdir(ddir):  # convert noise channels
-            self.report_progress('noise_channels.npy')
-            noise_list = list(np.load(Path(ddir, 'noise_channels.npy')))
-            for iprb,noise in enumerate(noise_list):
-                ff[f'{iprb}']['NOISE'] = np.array(noise, dtype='int')
-        # convert event channels, organize by probe -> shank -> event type
-        event_channel_dict = ephys.init_event_channels(ddir, probes=probes, psave=False)
-        for iprb,pdict in event_channel_dict.items():
-            epath = Path(ddir, f'theta_ripple_hil_chan_{iprb}.npy')
-            if os.path.isfile(epath):
-                self.report_progress(f'theta_ripple_hil_chan_{iprb}.npy')
-                event_channels = list(np.load(epath, allow_pickle=True))
-                for ii,ll in enumerate(event_channels):
-                    if len(ll)==3: pdict[ii] = list(ll)
-            event_channel_dict[iprb] = pdict
-        np.save(Path(ddir, 'theta_ripple_hil_chan.npy'), event_channel_dict, allow_pickle=True)
-        # convert saved CSDs and DS classifications
-        gg = h5py.File(Path(ddir, 'CSDs.hdf5'), 'w', track_order=True)
-        for iprb,probe in enumerate(probes):
-            if f'ds_csd_{iprb}.npz' in os.listdir(ddir):
-                self.report_progress(f'ds_csd_{iprb}.npz')
-                #CSD_dict = gg.create_group(str(iprb), track_order=True)
-                csd_npz = np.load(Path(ddir, f'ds_csd_{iprb}.npz'), allow_pickle=True, mmap_mode='r')
-                for ishank,shank in enumerate(probe.get_shanks()):
-                    if str(ishank) in csd_npz:
-                        K = f'/{iprb}/{ishank}'
-                        for k,v in csd_npz[f'{ishank}'].item().items():
-                            gg[f'{K}/{k}'] = v
-                        ddf = ephys.load_ds_dataset(ddir, iprb=iprb, ishank=ishank)
-                        if ddf is not None and ddf.size > 0 and 'type' in ddf.columns:
-                            ddf.to_hdf(gg.filename, key=f'{K}/DS_DF')
-                        if f'{ishank}_params' in csd_npz: # store params as attributes
-                            paramdict = dict(csd_npz[f'{ishank}_params'].item())
-                            gg[K].attrs.update(paramdict)
-                csd_npz.close()
-        ff.close()
-        gg.close()
-        self.data_signal.emit(list(self.transferred))
-        self.progress_signal.emit('Done!')
-        time.sleep(0.5)
-        self.finished.emit()
+#     def run(self):
+#         """ Organize recording data in HDF5 files """
+#         ddir = self.ddir
+#         ff = h5py.File(Path(ddir, 'DATA.hdf5'), 'w', track_order=True)
+#         probes = ephys.read_probe_group(ddir).probes
+#         # convert LFP timestamps and sampling rate
+#         if 'lfp_time.npy' in os.listdir(ddir):
+#             self.report_progress('lfp_time.npy')
+#             ff.create_dataset('lfp_time', data=np.load(Path(ddir, 'lfp_time.npy')))
+#         if  'lfp_fs.npy' in os.listdir(ddir):
+#             self.report_progress('lfp_fs.npy')
+#             ff.attrs['lfp_fs'] = int(np.load(Path(ddir, 'lfp_fs.npy')))
+#         # convert bandpass-filtered LFP signals and summary stats table
+#         if 'lfp_bp.npz' in os.listdir(ddir):
+#             self.report_progress('lfp_bp.npz')
+#             npz = np.load(Path(ddir, 'lfp_bp.npz'), allow_pickle=True, mmap_mode='r')
+#             for iprb in range(len(probes)):
+#                 PROBE_DSET = ff.create_group(str(iprb), track_order=True)
+#                 PROBE_LFPS = PROBE_DSET.create_group('LFP', track_order=True)
+#                 for k in npz.keys():
+#                     PROBE_LFPS.create_dataset(k, data=npz[k][iprb])
+#             npz.close()
+#         if 'channel_bp_std' in os.listdir(ddir):
+#             self.report_progress('channel_bp_std')
+#             STD_list = ephys.csv2list(ddir, 'channel_bp_std')
+#             for iprb,STD in enumerate(STD_list):
+#                 STD.to_hdf(ff.filename, key=f'/{iprb}/STD')
+#         # convert ripple and DS event dataframes
+#         for fname in ['ALL_SWR','ALL_DS']:
+#             if fname in os.listdir(ddir):
+#                 self.report_progress(fname)
+#                 DF_list = ephys.csv2list(ddir, fname)
+#                 for iprb,DF in enumerate(DF_list):
+#                     if not 'shank' in DF.columns:
+#                         DF['shank'] = pd.Series(probes[iprb].shank_ids.astype('int'))
+#                     DF.to_hdf(ff.filename, key=f'/{iprb}/{fname}')
+#         if 'THRESHOLDS.npy' in os.listdir(ddir):  # convert detection thresholds
+#             self.report_progress('THRESHOLDS.npy')
+#             threshold_list = list(np.load(Path(ddir, 'THRESHOLDS.npy'), allow_pickle=True))
+#             for iprb, thres_dict in enumerate(threshold_list):
+#                 for k,v in thres_dict.items():
+#                     thres_df = pd.DataFrame(v).T
+#                     thres_df.to_hdf(ff.filename, key=f'/{iprb}/{k}_THRES')
+#         if 'noise_channels.npy' in os.listdir(ddir):  # convert noise channels
+#             self.report_progress('noise_channels.npy')
+#             noise_list = list(np.load(Path(ddir, 'noise_channels.npy')))
+#             for iprb,noise in enumerate(noise_list):
+#                 ff[f'{iprb}']['NOISE'] = np.array(noise, dtype='int')
+#         # convert event channels, organize by probe -> shank -> event type
+#         event_channel_dict = ephys.init_event_channels(ddir, probes=probes, psave=False)
+#         for iprb,pdict in event_channel_dict.items():
+#             epath = Path(ddir, f'theta_ripple_hil_chan_{iprb}.npy')
+#             if os.path.isfile(epath):
+#                 self.report_progress(f'theta_ripple_hil_chan_{iprb}.npy')
+#                 event_channels = list(np.load(epath, allow_pickle=True))
+#                 for ii,ll in enumerate(event_channels):
+#                     if len(ll)==3: pdict[ii] = list(ll)
+#             event_channel_dict[iprb] = pdict
+#         np.save(Path(ddir, 'theta_ripple_hil_chan.npy'), event_channel_dict, allow_pickle=True)
+#         # convert saved CSDs and DS classifications
+#         gg = h5py.File(Path(ddir, 'CSDs.hdf5'), 'w', track_order=True)
+#         for iprb,probe in enumerate(probes):
+#             if f'ds_csd_{iprb}.npz' in os.listdir(ddir):
+#                 self.report_progress(f'ds_csd_{iprb}.npz')
+#                 #CSD_dict = gg.create_group(str(iprb), track_order=True)
+#                 csd_npz = np.load(Path(ddir, f'ds_csd_{iprb}.npz'), allow_pickle=True, mmap_mode='r')
+#                 for ishank,shank in enumerate(probe.get_shanks()):
+#                     if str(ishank) in csd_npz:
+#                         K = f'/{iprb}/{ishank}'
+#                         for k,v in csd_npz[f'{ishank}'].item().items():
+#                             gg[f'{K}/{k}'] = v
+#                         ddf = ephys.load_ds_dataset(ddir, iprb=iprb, ishank=ishank)
+#                         if ddf is not None and ddf.size > 0 and 'type' in ddf.columns:
+#                             ddf.to_hdf(gg.filename, key=f'{K}/DS_DF')
+#                         if f'{ishank}_params' in csd_npz: # store params as attributes
+#                             paramdict = dict(csd_npz[f'{ishank}_params'].item())
+#                             gg[K].attrs.update(paramdict)
+#                 csd_npz.close()
+#         ff.close()
+#         gg.close()
+#         self.data_signal.emit(list(self.transferred))
+#         self.progress_signal.emit('Done!')
+#         time.sleep(0.5)
+#         self.finished.emit()
     
-    def report_progress(self, txt=None):
-        """ Collect successfully converted data files """
-        #hdr = 'Converting the following data files:'
-        if txt is not None:
-            self.transferred.append(txt)
-        fstring = ', '.join(self.transferred) + ' ... '
-        if txt is None: fstring += 'Done!'
-        #msg = f'<center>{hdr}<br><br>{fstring}</center>'
-        #self.progress_signal.emit(msg)
-        self.progress_signal.emit('Converting files ...')
+#     def report_progress(self, txt=None):
+#         """ Collect successfully converted data files """
+#         #hdr = 'Converting the following data files:'
+#         if txt is not None:
+#             self.transferred.append(txt)
+#         fstring = ', '.join(self.transferred) + ' ... '
+#         if txt is None: fstring += 'Done!'
+#         #msg = f'<center>{hdr}<br><br>{fstring}</center>'
+#         #self.progress_signal.emit(msg)
+#         self.progress_signal.emit('Converting files ...')
 
 
 def get_analysis_btn(label, color, enabled=True):
@@ -255,33 +256,33 @@ class ProcessedRecordingSelectionPopup(QtWidgets.QDialog):
         self.worker_object.finished.connect(self.worker_thread.quit)
         self.worker_thread.finished.connect(self.worker_object.deleteLater)
         self.worker_thread.finished.connect(self.worker_thread.deleteLater)
-        self.worker_thread.finished.connect(self.finished_conversion)
+        # self.worker_thread.finished.connect(self.finished_conversion)
     
-    def start_conversion(self):
-        """ Worker thread starts the data conversion pipeline """
-        self.worker_object = ConverterBot()
-        self.worker_object.ddir = self.ddir
-        self.worker_object.data_signal.connect(self.conversion_slot)
-        self.create_workers()
-        self.spinner_window.start_spinner()
-        self.worker_thread.start()
+    # def start_conversion(self):
+    #     """ Worker thread starts the data conversion pipeline """
+    #     self.worker_object = ConverterBot()
+    #     self.worker_object.ddir = self.ddir
+    #     self.worker_object.data_signal.connect(self.conversion_slot)
+    #     self.create_workers()
+    #     self.spinner_window.start_spinner()
+    #     self.worker_thread.start()
         
-    def finished_conversion(self):
-        """ Worker thread completes the data conversion pipeline """
-        self.spinner_window.stop_spinner()
-        self.worker_object = None
-        self.worker_thread = None
+    # def finished_conversion(self):
+    #     """ Worker thread completes the data conversion pipeline """
+    #     self.spinner_window.stop_spinner()
+    #     self.worker_object = None
+    #     self.worker_thread = None
     
-    @QtCore.pyqtSlot(list)
-    def conversion_slot(self, transferred):
-        # prompt user to delete original data files after migration
-        msg = '<center>Conversion successful!<br>Delete remaining NPZ files?</center>'
-        res = gi.MsgboxSave(msg, parent=self).exec()
-        if res == QtWidgets.QMessageBox.Yes:
-            for fname in transferred:
-                os.remove(Path(self.ddir, fname))
-            print(f'{len(transferred)} NPZ files removed from directory!')
-        self.ddir_updated()
+    # @QtCore.pyqtSlot(list)
+    # def conversion_slot(self, transferred):
+    #     # prompt user to delete original data files after migration
+    #     msg = '<center>Conversion successful!<br>Delete remaining NPZ files?</center>'
+    #     res = gi.MsgboxSave(msg, parent=self).exec()
+    #     if res == QtWidgets.QMessageBox.Yes:
+    #         for fname in transferred:
+    #             os.remove(Path(self.ddir, fname))
+    #         print(f'{len(transferred)} NPZ files removed from directory!')
+    #     self.ddir_updated()
         
     def clear_dropdown(self, dropdown):
         """ Clear probes/shanks from dropdowns """
@@ -321,11 +322,11 @@ class ProcessedRecordingSelectionPopup(QtWidgets.QDialog):
         probes = ephys.read_probe_group(self.ddir).probes
         self.update_probe_dropdown(probes)
         
-        if opt1 == 2:  # prompt user to convert data to new HDF5 format
-            res = gi.MsgboxQuestion('Convert NPZ to HDF5?', parent=self).exec()
-            if res == QtWidgets.QMessageBox.Yes:
-                self.start_conversion()
-                return
+        # if opt1 == 2:  # prompt user to convert data to new HDF5 format
+        #     res = gi.MsgboxQuestion('Convert NPZ to HDF5?', parent=self).exec()
+        #     if res == QtWidgets.QMessageBox.Yes:
+        #         self.start_conversion()
+        #         return
         # enable channel selection GUI and/or classification GUI
         self.channel_selection_btn.setEnabled(True)
         self.enable_disable_classification()

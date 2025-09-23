@@ -124,12 +124,12 @@ TRANGE_TOGGLE_BTN['QPushButton'].update({
                                          })
 
 ###   show/hide raw recording metadata
-
-META_TOGGLE_BTN = deepcopy(TOGGLE_BTN)
-META_TOGGLE_BTN['QPushButton'].update({
-                                      'image' : 'url(:/icons/info_blue.png)',
-                                      'padding' : '4px',
-                                      })
+# can remove
+# META_TOGGLE_BTN = deepcopy(TOGGLE_BTN)
+# META_TOGGLE_BTN['QPushButton'].update({
+#                                       'image' : 'url(:/icons/info_blue.png)',
+#                                       'padding' : '4px',
+#                                       })
 
 ##############################################################################
 ################                     ICONS                    ################

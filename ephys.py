@@ -38,14 +38,42 @@ import icsd
 
 ###   BASE FOLDERS   ###
 
-def base_dirs(return_keys=False):
-    """ Return default data directories saved in default_folders.txt """
-    # Mode 0 for paths only, 1 for keys only
-    with open('default_folders.txt', 'r') as fid:
-        keys,vals = zip(*[map(str.strip, l.split('=')) for l in fid.readlines()])
-    if not return_keys:
+def base_dirs(return_keys=False): #✅
+    """
+    Return a list of data directories saved in default_folders.txt.
+
+    default_folders.txt looks like this:
+        RAW_DATA = /path/to/raw
+        PROBE_FILES = /path/to/probes
+        DEFAULT_PROBE = /path/to/probe.json
+        DEFAULT_PARAMETERS = /path/to/params.txt
+
+    return_keys:
+        True:               produces a list of (key, path) pairs, i.e. [("RAW_DATA", "C:/Users/..."), ("PROBE_FILES", "C:/Users/.../probe_file_dir/"), ...]
+        False (default):    produces list of paths only, i.e. ["C:/Users/...", "C:/Users/.../probe_file_dir/", ...]
+    """
+    # Open the text file and extract key/value pairs line by line
+    with open('default_folders.txt', 'r') as file:
+        # Code explanation:
+            # Get a list of lines in the file with file.readlines()
+            # Iterate over each line via the list comprehension
+            # For each line, apply str.strip to the list produced by line.split("="), which is a two-element list of key, path
+            # Notably, .split("=") returns an empty string element if there is nothing after the = sign, as could be the case if a base folder is not set
+            # map(function, iterable) applies the function to each element in the iterable and returns an iterator with the results
+            # *[...] unpacks the iterator into a list such that zip gets len(list) arguments
+            # zip groups all elements at index i in all its arguments, so all the keys (index 0) get grouped into a list and all the vals (index 1, paths) get grouped into a list
+        keys, vals = zip(*[map(str.strip, line.split('=')) for line in file.readlines()])
+
+    # Return extracted base directory information
+        # Index     Content             Type
+        # 0         RAW_DATA            directory
+        # 1         PROBE_FILES         directory
+        # 2         DEFAULT_PROBE       json
+        # 3         DEFAULT_PARAMETERS  txt
+    if return_keys:
+        return list(zip(keys, vals))
+    else: # (default)
         return list(vals)
-    return list(zip(keys,vals))
 
 def write_base_dirs(ddir_list):
     """ Write input directories to default_folders.txt """
@@ -114,8 +142,18 @@ def init_default_folders():
 ###   PARAMETER SETTINGS   ###
     
 def read_params():
-    """ Return parameter dictionary from current param file """
-    ddict = qparam.fix_params(qparam.read_param_file(base_dirs()[3], return_none=False)[0])
+    """ 
+    Return parameter dictionary from current param file.
+    """
+    # Get the path to the parameters .txt file
+    parameters_txt_path = base_dirs()[3]
+
+    # Parse the parameters .txt file and get a dictionary of validated parameters
+    valid_param_dict = qparam.read_param_file(parameters_txt_path, return_none=False)[0]
+
+    # Fix the parameter dict by adding default values back in for any parameters that were missing
+    ddict = qparam.fix_params(valid_param_dict)
+
     return ddict
 
 ###   RECORDING NOTES/PARAMS   ###
@@ -149,6 +187,7 @@ def load_recording_params(ddir):
     PARAMS = pd.Series(pickle.load(open(Path(ddir, 'params.pkl'), 'rb')))
     return PARAMS
 
+# TODO Never called; remove
 def save_recording_params(ddir, PARAMS):
     """ Save param values used to analyze processed data """
     PARAMS = dict(PARAMS)
@@ -296,47 +335,57 @@ def demo_probe():
 ##############################################################################
 
 
-def select_directory(init_ddir='', title='Select directory', show_dirs_only=False, parent=None):
-    """ Return selected directory name """
-    opts = QtWidgets.QFileDialog.DontUseNativeDialog
-    if show_dirs_only:
-        opts = opts | QtWidgets.QFileDialog.ShowDirsOnly
-    ddir = QtWidgets.QFileDialog.getExistingDirectory(parent, title, init_ddir, 
-                                                      options=opts)
-    return ddir
+def select_directory(init_ddir='', title='Select directory', parent=None):#✅
+    """ 
+    Create a QFileDialog for users to select a directory. Return selected directory file path (str).
+    """
+    directory_path = QtWidgets.QFileDialog.getExistingDirectory(parent, title, init_ddir)
+    return directory_path
 
-def select_raw_recording_file(supported_extensions, init_ppath=None,
-                              title='Select raw recording file', parent=None):
-    """ Return selected recording file name """
-    if init_ppath is None: init_ppath = base_dirs()[0]
-    # get file extension filter
-    opts = QtWidgets.QFileDialog.DontUseNativeDialog
-    ffilter = f'Raw files ({" ".join([*map(lambda x: "*"+x, supported_extensions)])})'
-    fpath,_ = QtWidgets.QFileDialog.getOpenFileName(parent, title, init_ppath, 
-                                                    ffilter, options=opts)
-    return fpath
+def select_raw_recording_file(supported_extensions, init_ppath=None, title='Select raw recording file', parent=None):#✅
+    """
+    Create a QFileDialog for users to select a recording file. Return selected recording file path (str).
+    """
+    # Get the stored input data directory (if another initial path is not provided)
+    if init_ppath is None: 
+        init_ppath = base_dirs()[0]
+        
+    # Create a filter for QFileDialog
+        # Format is "Description (*.ext1 *ext2 *ext3)" (note there are no commas between each file type)
+        # Add a star to each supported extension and join with a space
+    file_type_filter = f'Raw files ({" ".join([*map(lambda x: "*"+x, supported_extensions)])})'
+
+    # Make a QFileDialog and use function "getOpenFileName" to return a file name (as type str) selected by the user
+        # parent: If provided, creates a modal file dialog with the parent QWidget (the parent widget will be inaccessible until the file dialog is closed)
+        # caption/title: window title
+        # directory/init_ppath: file dialog working directory is set here
+        # filter/ffilter: string of format ("Raw files (*ext1 *ext2 ...)")
+        # options: controls behavior/appearance of file dialog (not used; previously was used to force Qt to use its built-in dialog rather than the OS-native one)
+    file_dialog = QtWidgets.QFileDialog
+    file_path, _ = file_dialog.getOpenFileName(parent = parent, caption = title, directory = init_ppath, filter = file_type_filter)
+    return file_path
 
 def select_load_probe_file(init_ppath=None, title='Select probe configuration file',
                            exts=['.json', '.prb', '.mat'], parent=None):
     """ Return selected probe config file name and the loaded probe object """
-    if init_ppath is None: init_ppath = base_dirs()[1]
-    opts = QtWidgets.QFileDialog.DontUseNativeDialog
+    if init_ppath is None: 
+        init_ppath = base_dirs()[1]
+
     ffilter = f'Probe files ({" ".join([*map(lambda x: "*"+x, exts)])})'
-    fpath,_ = QtWidgets.QFileDialog.getOpenFileName(parent, title, init_ppath, 
-                                                    ffilter, options=opts)
+    
+    fpath,_ = QtWidgets.QFileDialog.getOpenFileName(parent, title, init_ppath, ffilter)
     if fpath:
         probe = read_probe_file(fpath)
         return probe, fpath
+    
     return None, None
 
 def select_load_param_file(init_ppath=None, title='Select parameter file',
                            allow_invalid_params=False, show_msgbox=True, parent=None):
     """ Return selected param file name and the loaded param dictionary """
     if init_ppath is None: init_ppath = os.getcwd()
-    opts = QtWidgets.QFileDialog.DontUseNativeDialog
     ffilter = 'Text files (*.txt)'
-    fpath,_ = QtWidgets.QFileDialog.getOpenFileName(parent, title, init_ppath, 
-                                                    ffilter, options=opts)
+    fpath,_ = QtWidgets.QFileDialog.getOpenFileName(parent, title, init_ppath, ffilter)
     if fpath:
         PARAMS, invalid_keys = qparam.read_param_file(fpath, return_none=False)
         if not allow_invalid_params and len(invalid_keys) > 0:
@@ -383,87 +432,224 @@ def select_save_param_file(ddict, init_ddir=os.getcwd(), init_fname='default_par
     return None
     
     
-class SaveFileDialog(QtWidgets.QFileDialog):
-    """ QFileDialog with custom filters for saving directories/files """
+# class SaveFileDialog(QtWidgets.QFileDialog):
+#     """ QFileDialog with custom filters for saving directories/files """
     
+#     def __init__(self, filter_txt='All files', exts=[], title='Save As', parent=None):
+#         super().__init__(parent)
+#         self.setWindowTitle(title)
+#         self.exts = exts  # list of accepted file extensions
+#         # set file dialog options
+#         self.setModal(True)
+#         self.setViewMode(self.List)
+#         self.setAcceptMode(self.AcceptSave)
+#         if exts == ['']:
+#             self.setFileMode(self.Directory)
+#         else:
+#             self.setFileMode(self.AnyFile)
+#         # self.setOption(self.DontUseNativeDialog, True)
+#         self.setOption(self.DontConfirmOverwrite, True)
+#         # set file extension filter
+#         ext_str = ' '.join([f'*{x}' for x in exts])
+#         if len(exts)==0 : ffilter = ''
+#         elif exts==[''] : ffilter = ''  # directory mode
+#         else            : ffilter = f'{filter_txt} ({ext_str})'
+#         self.setNameFilter(ffilter)
+#         # get "Save" button and filename input
+#         self.btn = self.findChild(QtWidgets.QPushButton)
+
+#         # But from native dialog... need to fix
+#         # self.lineEdit = self.findChild(QtWidgets.QLineEdit)
+#         # self.lineEdit.textChanged.connect(self.updated_filename)
+    
+#     def updated_filename(self, fname):
+#         """ Enable file selection if extension is valid """
+#         base, ext = os.path.splitext(fname)
+#         if base == '' or base.startswith('.'):
+#             x = False
+#         elif len(self.exts) == 0:
+#             x = True
+#         else:
+#             x = bool(ext in self.exts)
+#         self.btn.setEnabled(x)
+    
+#     def accept(self):
+#         """ Implement file validation and overwrite warnings """
+#         if not self.btn.isEnabled():  # invalid filename
+#             return
+#         ddir = self.directory().path()
+#         # fname = self.lineEdit.text()
+#         # ppath = str(Path(ddir, fname))
+#         # if os.path.exists(ppath):
+#         #     if os.path.isdir(ppath):
+#         #         n_items = len(os.listdir(ppath))
+#         #         suffix = '' if n_items == 1 else 's'
+#         #         msg = f'Folder "{fname}" contains {n_items} item{suffix}.'
+#         #         sub_msg = 'Overwrite existing directory?'
+#         #     elif os.path.isfile(ppath):
+#         #         msg = f'File "{fname}" already exists.'
+#         #         sub_msg = 'Do you want to replace it?'
+#         #     # launch messagebox
+#         #     msgbox = QtWidgets.QMessageBox(QtWidgets.QMessageBox.Warning, '', msg, 
+#         #                                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+#         #     msgbox.setInformativeText(sub_msg)
+#         #     res = msgbox.exec()
+#         #     if res != QtWidgets.QMessageBox.Yes:
+#         #         return
+#         QtWidgets.QDialog.accept(self)
+    
+#     @classmethod
+#     def run(cls, init_ddir='', init_fname='', filter_txt='All files', exts=[], 
+#             title='Save As', parent=None):
+#         """ Initialize file dialog with the given params, return selected file """
+#         pyfx.qapp()
+#         dlg = cls(filter_txt=filter_txt, exts=exts, title=title, parent=parent)
+#         if os.path.isdir(init_ddir):
+#             dlg.setDirectory(init_ddir)
+#         # initialize file name and button status
+#         # pyfx.stealthy(dlg.lineEdit, init_fname)
+#         dlg.updated_filename(init_fname)
+#         res = dlg.exec()
+#         # if res:
+#         #     fpath = str(Path(dlg.directory().path(), dlg.lineEdit.text()))
+#         #     return fpath
+#         return None
+
+
+class SaveFileDialog(QtWidgets.QFileDialog):
     def __init__(self, filter_txt='All files', exts=[], title='Save As', parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.exts = exts  # list of accepted file extensions
-        # set file dialog options
+        self.exts = exts
+        self._last_selected = None  # track selection in native dir mode
+
+        # Common options
         self.setModal(True)
         self.setViewMode(self.List)
-        self.setAcceptMode(self.AcceptSave)
-        if exts == ['']:
-            self.setFileMode(self.Directory)
-        else:
-            self.setFileMode(self.AnyFile)
-        self.setOption(self.DontUseNativeDialog, True)
         self.setOption(self.DontConfirmOverwrite, True)
-        # set file extension filter
-        ext_str = ' '.join([f'*{x}' for x in exts])
-        if len(exts)==0 : ffilter = ''
-        elif exts==[''] : ffilter = ''  # directory mode
-        else            : ffilter = f'{filter_txt} ({ext_str})'
-        self.setNameFilter(ffilter)
-        # get "Save" button and filename input
-        self.btn = self.findChild(QtWidgets.QPushButton)
-        self.lineEdit = self.findChild(QtWidgets.QLineEdit)
-        self.lineEdit.textChanged.connect(self.updated_filename)
-    
-    def updated_filename(self, fname):
-        """ Enable file selection if extension is valid """
-        base, ext = os.path.splitext(fname)
-        if base == '' or base.startswith('.'):
-            x = False
-        elif len(self.exts) == 0:
-            x = True
+
+        if self.exts == ['']:
+            # --- DIRECTORY MODE (native-safe) ---
+            self.setFileMode(self.Directory)
+            self.setOption(self.ShowDirsOnly, True)
+            self.setAcceptMode(self.AcceptOpen)  # <-- key for native dialogs
+            # When a folder is highlighted or chosen, remember it
+            self.currentChanged.connect(self._on_current_changed)
+            self.fileSelected.connect(self._on_file_selected)
         else:
-            x = bool(ext in self.exts)
-        self.btn.setEnabled(x)
-    
+            # --- FILE MODE ---
+            self.setFileMode(self.AnyFile)
+            self.setAcceptMode(self.AcceptSave)
+
+        # Optional name filter (harmless in dir mode)
+        ext_str = ' '.join([f'*{x}' for x in self.exts])
+        if len(self.exts) == 0 or self.exts == ['']:
+            ffilter = ''
+        else:
+            ffilter = f'{filter_txt} ({ext_str})'
+        if ffilter:
+            self.setNameFilter(ffilter)
+
+    # --- helpers ---
+    def _dir_path(self) -> str:
+        d = self.directory()
+        return d.absolutePath() if hasattr(d, 'absolutePath') else d.path()
+
+    def _normalized_target_path(self) -> str:
+        ddir = self._dir_path()
+        files = self.selectedFiles()
+        if files:
+            ppath = files[0]
+            if not os.path.isabs(ppath):
+                ppath = str(Path(ddir, ppath))
+        else:
+            # In native dir mode the user may have just navigated; use current dir
+            ppath = ddir
+
+        if self.exts not in ([], ['']):
+            base, ext = os.path.splitext(ppath)
+            if ext == '' and base != '':
+                ppath = base + self.exts[0]
+        return ppath
+
+    # --- dir-mode tracking ---
+    def _on_current_changed(self, path):
+        # When browsing directories, remember the last focused/entered path
+        self._last_selected = path
+
+    def _on_file_selected(self, path):
+        self._last_selected = path
+
+    # --- accept/validate ---
     def accept(self):
-        """ Implement file validation and overwrite warnings """
-        if not self.btn.isEnabled():  # invalid filename
+        ppath = self._normalized_target_path()
+
+        if self.exts == ['']:
+            # DIRECTORY MODE: treat either an explicit selection OR current folder as the choice
+            name = os.path.basename(ppath.rstrip('/\\'))
+            if name in ('', '.', '..'):
+                return
+
+            if os.path.isdir(ppath):
+                try:
+                    n_items = len(os.listdir(ppath))
+                except Exception:
+                    n_items = 0
+                if n_items > 0:
+                    suffix = '' if n_items == 1 else 's'
+                    msg = f'Folder "{name}" contains {n_items} item{suffix}.'
+                    sub_msg = 'Overwrite existing directory?'
+                    m = QtWidgets.QMessageBox(QtWidgets.QMessageBox.Warning, '', msg,
+                                              QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+                    m.setInformativeText(sub_msg)
+                    if m.exec() != QtWidgets.QMessageBox.Yes:
+                        return
+            self._final_path = ppath
+            QtWidgets.QDialog.accept(self)
             return
-        ddir = self.directory().path()
-        fname = self.lineEdit.text()
-        ppath = str(Path(ddir, fname))
+
+        # FILE MODE (unchanged from the version I gave you)
+        base = os.path.basename(ppath)
+        if base == '' or base.startswith('.'):
+            return
+        if len(self.exts) > 0:
+            _, ext = os.path.splitext(ppath)
+            if ext not in self.exts:
+                return
         if os.path.exists(ppath):
             if os.path.isdir(ppath):
-                n_items = len(os.listdir(ppath))
+                try:
+                    n_items = len(os.listdir(ppath))
+                except Exception:
+                    n_items = 0
                 suffix = '' if n_items == 1 else 's'
-                msg = f'Folder "{fname}" contains {n_items} item{suffix}.'
+                msg = f'Folder "{base}" contains {n_items} item{suffix}.'
                 sub_msg = 'Overwrite existing directory?'
-            elif os.path.isfile(ppath):
-                msg = f'File "{fname}" already exists.'
+            else:
+                msg = f'File "{base}" already exists.'
                 sub_msg = 'Do you want to replace it?'
-            # launch messagebox
-            msgbox = QtWidgets.QMessageBox(QtWidgets.QMessageBox.Warning, '', msg, 
-                                           QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
-            msgbox.setInformativeText(sub_msg)
-            res = msgbox.exec()
-            if res != QtWidgets.QMessageBox.Yes:
+            m = QtWidgets.QMessageBox(QtWidgets.QMessageBox.Warning, '', msg,
+                                      QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+            m.setInformativeText(sub_msg)
+            if m.exec() != QtWidgets.QMessageBox.Yes:
                 return
+        self._final_path = ppath
         QtWidgets.QDialog.accept(self)
-    
+
     @classmethod
-    def run(cls, init_ddir='', init_fname='', filter_txt='All files', exts=[], 
+    def run(cls, init_ddir='', init_fname='', filter_txt='All files', exts=[],
             title='Save As', parent=None):
-        """ Initialize file dialog with the given params, return selected file """
         pyfx.qapp()
         dlg = cls(filter_txt=filter_txt, exts=exts, title=title, parent=parent)
         if os.path.isdir(init_ddir):
             dlg.setDirectory(init_ddir)
-        # initialize file name and button status
-        pyfx.stealthy(dlg.lineEdit, init_fname)
-        dlg.updated_filename(init_fname)
+        if init_fname and exts != ['']:
+            dlg.selectFile(init_fname)  # avoid pre-filling in dir mode
         res = dlg.exec()
         if res:
-            fpath = str(Path(dlg.directory().path(), dlg.lineEdit.text()))
-            return fpath
+            return dlg._normalized_target_path()
         return None
-    
+
 
 ##############################################################################
 ##############################################################################
@@ -1061,31 +1247,33 @@ def get_ds_peaks(LFP, lfp_time, lfp_fs, pprint=True, **kwargs):
     return df, thresholds
 
 
-def get_seizures(spks, lfp_time, lfp_fs, baseline=[0,5], thres=10, sep=10, 
-                  pprint=True, pplot=True):
-    """ Basic seizure detection using summed magnitude of all LFP channels """
-    # get min separation (# samples) between individual seizure events
-    isep = int(round(sep/1000 * lfp_fs))
-    # calculate threshold from baseline interval
-    ibase0, ibase1 = [int(round(x*lfp_fs)) for x in baseline]
-    base_spks = spks[ibase0 : ibase1]
-    thr = base_spks.std() * thres
-    # get sequences of consecutive indices above threshold
-    idx = np.where(spks >= thr)[0]
-    edges = np.concatenate([[0], np.where(np.diff(idx) > isep)[0]+1, [len(idx)]])
-    seqs = [idx[a:b] for a,b in zip(edges[0:-1], edges[1:])]
-    if pprint:
-        print(f'{len(seqs)} spikes detected (thres = {thres})')
-    if pplot:
-        fig,ax = plt.subplots(layout='tight')
-        ax.plot(lfp_time, spks)
-        ax.axhline(thr, color='red')
-        for seq in seqs:
-            ax.plot(lfp_time[seq], spks[seq])
-        ax.set(xlabel='Time (s)', ylabel='$\Sigma$ LFP ampl. (mV)', 
-               title=f'Interictal spikes (n={len(seqs)})')
-        sns.despine()
-    return seqs, thr
+# commented out 08/25/2025; doesn't appear to be used anywhere
+# TODO: remove if not needed
+# def get_seizures(spks, lfp_time, lfp_fs, baseline=[0,5], thres=10, sep=10, 
+#                   pprint=True, pplot=True):
+#     """ Basic seizure detection using summed magnitude of all LFP channels """
+#     # get min separation (# samples) between individual seizure events
+#     isep = int(round(sep/1000 * lfp_fs))
+#     # calculate threshold from baseline interval
+#     ibase0, ibase1 = [int(round(x*lfp_fs)) for x in baseline]
+#     base_spks = spks[ibase0 : ibase1]
+#     thr = base_spks.std() * thres
+#     # get sequences of consecutive indices above threshold
+#     idx = np.where(spks >= thr)[0]
+#     edges = np.concatenate([[0], np.where(np.diff(idx) > isep)[0]+1, [len(idx)]])
+#     seqs = [idx[a:b] for a,b in zip(edges[0:-1], edges[1:])]
+#     if pprint:
+#         print(f'{len(seqs)} spikes detected (thres = {thres})')
+#     if pplot:
+#         fig,ax = plt.subplots(layout='tight')
+#         ax.plot(lfp_time, spks)
+#         ax.axhline(thr, color='red')
+#         for seq in seqs:
+#             ax.plot(lfp_time[seq], spks[seq])
+#         ax.set(xlabel='Time (s)', ylabel='$\Sigma$ LFP ampl. (mV)', 
+#                title=f'Interictal spikes (n={len(seqs)})')
+#         sns.despine()
+#     return seqs, thr
 
 
 ##############################################################################

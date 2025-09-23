@@ -449,65 +449,113 @@ def sizepol(widget, hpol=None, vpol=None):
     if vpol is not None: policy.setVerticalPolicy(vpol)
     widget.setSizePolicy(policy)
     
-def get_widget_container(orientation, *widgets, widget='none', **kwargs):
-    """ Organize $widgets in a QBoxLayout, optionally embedded in a parent widget """
+def get_widget_container(orientation, *widgets, widget='none', **kwargs):#✅
+    """
+    Organize "widgets" in a QBoxLayout, optionally embedded in a parent widget.
+
+    Function can be called as get_widget_container(orientation, w1, w2, w3, ...); below, in the function definition, *widgets will correspond to (w1, w2, w3).
     
+    Returns a QBoxLayout if no parent widget is specified. 
+    If a parent widget is specified, returns child widgets embedded into a parent widget of that type. 
+
+    Keyword arguments:
+    - "alignments"
+    - "stretch_factors": stretch factors, list with as many elements as widgets provided (indicates the proportion of space the widget will stretch)
+    - "cm": content margins, 4-element tuple of (left, top, right, bottom) in pixels
+    - "spacing": spacing between rows/columns
+    """
+    
+    # Check the "orientation" is valid
     assert orientation in ['v','h'], f'Invalid orientation "{orientation}".'
+
+    # Extract keyword arguments if present
     alignments, stretch_factors = [kwargs.get(k,[]) for k in ['alignments','stretch_factors']]
-    cm = kwargs.get('cm', (0,0,0,0))
+    cm = kwargs.get("cm", (0,0,0,0)) # Default of 0px content margins if not specified
+    spacing = kwargs.get("spacing", 1) # Default of 1px spacing if not specified
     
+    # Helper function for getting QVBox or QHbox layouts
     def get_qboxlayout(orientation):
         if orientation=='v': 
-            return QtWidgets.QVBoxLayout() # vertical layout
-        return QtWidgets.QHBoxLayout()     # horizontal layout
+            return QtWidgets.QVBoxLayout() # Vertical layout
+        else:
+            return QtWidgets.QHBoxLayout() # Horizontal layout
     
+    # Get the main layout
     layout = get_qboxlayout(orientation)
-    if cm is not None: layout.setContentsMargins(*cm)
-    layout.setSpacing(kwargs.get('spacing', 1))
+
+    # Set content margins
+    layout.setContentsMargins(*cm)
+
+    # Set spacing between rows/columns of layout
+    layout.setSpacing(spacing)
     
-    for i,w in enumerate(widgets):
-        ddict = {}  # set item stretch and alignment within container layout
+    # Add each widget to the layout
+    for i, w in enumerate(widgets):
+        kwarg_dict = {}  # set item stretch and alignment within container layout
+
+        # Add stretch factor to keyword argument dict
         if len(stretch_factors) == len(widgets):
-            ddict['stretch'] = stretch_factors[i]
+            kwarg_dict['stretch'] = stretch_factors[i]
+
+        # Add alignment to keyword argument dict
         if len(alignments) == len(widgets) and w.inherits('QWidget'):
-            ddict['alignment'] = alignments[i]
-        if isinstance(w, int)     : layout.addSpacing(w) # add spacing
-        elif w.inherits('QWidget'): layout.addWidget(w, **ddict) # add widget
-        elif w.inherits('QLayout'): layout.addLayout(w, **ddict) # add layout
+            print("Check: Alignment used")
+            kwarg_dict['alignment'] = alignments[i]
+
+        if isinstance(w, int): 
+            layout.addSpacing(w) # add spacing TODO remove if it never happens
+            print("Check: Int used as widget for spacing")
+        
+        # Add widget to main layout
+        elif w.inherits('QWidget'):
+            layout.addWidget(w, **kwarg_dict) # add widget
+
+        # Add layout to main layout
+        elif w.inherits('QLayout'):
+            layout.addLayout(w, **kwarg_dict) # add layout
+    
+    # Create parent widget (if not "none") and embed layout
     if widget in ['widget','frame','scroll']:
+        # Create QtWidgets widget object
         w = QtWidgets.QWidget() if widget in ['widget','scroll'] else QtWidgets.QFrame()
+
+        # Set the widget's layout to the layout created above with the provided child widgets
         w.setLayout(layout)
+
         if widget == 'scroll':
             q = QtWidgets.QScrollArea()
             q.setWidgetResizable(True)
-            q.setWidget(w)
-            return q  # embed layout within a QScrollArea
+            q.setWidget(w) # Embed the widget's layout in a QScrollArea
+            return q
         else:
-            return w  # embed layout within a QWidget or QFrame
-    elif widget == 'groupbox':
-        gbox = QtWidgets.QGroupBox()
-        if kwargs.get('inter', False):
-            gbox_lay = get_qboxlayout(orientation)
-            gbox_lay.setContentsMargins(0,0,0,0)
-            w = QtWidgets.QWidget()
-            w.setLayout(layout)
-            gbox_lay.addWidget(w)
-        else:
-            gbox_lay = layout
-        gbox.setLayout(gbox_lay)
-        return gbox  # embed layout withing a QGroupBox
-    elif widget == 'dialog':
-        dlg = QtWidgets.QDialog() # embed layout within a QDialog window
-        dlg.setLayout(layout)
-        return dlg
-    else:
-        return layout # return layout object
+            return w  # Return QWidget or QFrame without further changes
     
-def center_window(widget):
-    """ Move widget to center of screen """
-    qrect = widget.frameGeometry()  # proxy rectangle for window with frame
-    qrect.moveCenter(ScreenRect().center())  # move center of qr to center of screen
-    widget.move(qrect.topLeft())
+    # KNE change: removed groupbox option here since it doesn't appear to be used
+
+    elif widget == 'dialog':
+        w = QtWidgets.QDialog() # Esmbed layout within a QDialog window
+        w.setLayout(layout)
+        return w
+    
+    # Default (widget == "none")
+    else: 
+        return layout # Return layout object
+    
+def center_window(widget):#✅
+    """
+    Move widget to center of screen
+    """
+    # Get the widget's window geometry (x, y, width, height) where x, y are the top left coordinates
+    widget_rect = widget.frameGeometry()
+
+    # Ge the screen's geometry
+    screen_rect = widget.screen().availableGeometry()
+
+    # Move the widget rectangle's center to the center of the screen
+    widget_rect.moveCenter(screen_rect.center())
+    
+    # Move the widget to the newly-centered widget rectangle
+    widget.move(widget_rect.topLeft())
         
         
 def InterWidgets(parent, orientation='v'):

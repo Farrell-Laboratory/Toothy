@@ -219,55 +219,108 @@ def fix_params(ddict, default_dict=None):
 ##############################################################################
 ##############################################################################
 
+def param_txt_to_dict(filepath):#✅
+    """
+    Read in parameters from a .txt file and return dictionary of key/value pairs.
 
-def read_lines(filepath):
-    """ Read in parameter file lines, return dictionary of key:value pairs """
-    # strip whitespace and ignore lines beginning with comment (#)
+    Parameter file looks like this:
+        ###  PARAMETERS  ###
+
+        lfp_fs = 1000.0;
+        trange = [0.0, -1.0];
+        theta = [6.0, 10.0];
+        ...
+    """
+    # Open the file, read lines, and strip the whitespace off each line
     with open(filepath, 'r') as f:
         lines = [l.strip() for l in f.readlines()]
-    PARAMS = parse_lines(lines)
-    return PARAMS
 
-def parse_lines(lines):
-    """ Convert text lines to parameter dictionary """
-    PARAMS = {}
-    lines = [l for l in lines if not l.startswith('#') and len(l) > 0]
+    # Ignore any lines that start with "#" or are empty
+    lines = [line for line in lines if not line.startswith("#") and len(line) > 0]
+
+    # Parse lines 
+    param_dict = {}
     for line in lines:
-        d = line.split(';')[0]  # ";" is the end of the line
-        k,v = [x.strip() for x in d.split('=')]   # "=" splits keys and values
-        if v.startswith('[') and v.endswith(']'): # values in brackets are lists
-            val = []
-            for x in v[1:-1].split(','):
-                try: x2 = float(x.strip())
-                except: x2 = str(x.strip())
-                val.append(x2)
-            #val = [float(x.strip()) for x in v[1:-1].split(',')]
-        else:
-            try    : val = float(v)  # if value is numerical, store as float
-            except : val = str(v)    # otherwise, store as string
-        if   val == 'True'  : val = True  # convert "True"/"False" strings to boolean
-        elif val == 'False' : val = False
-        PARAMS[k] = val
-    return PARAMS
+        # Get the content before the semicolon which marks the end of the line
+        content = line.split(";")[0]
 
-def read_param_file(filepath='default_params.txt', exclude_fs=False, return_none=True):
-    """ Return dictionary of parameters loaded from .txt file """
-    try: # read in param file, parse lines and organize into key:value dictionary
-        assert os.path.exists(filepath) and os.path.isfile(filepath)
-        PARAMS = read_lines(filepath)
+        # Split the line into a key and value, separated in the file by =
+        k, v = [element.strip() for element in content.split("=")]
+
+        # Parse values in brackets as lists (note: this does not handle boolean elements in lists)
+        if v.startswith("[") and v.endswith("]"):
+            parsed_v = []
+            list_elements = v[1:-1].split(",")
+            for element in list_elements:
+                try:
+                    parsed_element = float(element.strip())
+                except:
+                    parsed_element = str(element.strip())
+                parsed_v.append(parsed_element)
+        
+        # Parse non-list values as either numerical or string
+        else:
+            try:
+                parsed_v = float(v)
+            except:
+                parsed_v = str(v)
+
+                # Convert "True"/"False" strings to Booleans
+                if parsed_v == "True":
+                    parsed_v = True
+                if parsed_v == "False":
+                    parsed_v = False
+        
+        # Add key with parsed value to dictionary
+        param_dict[k] = parsed_v
+
+    # param_dict = parse_lines(lines) # TODO remove KNE
+    return param_dict
+
+# def parse_lines(lines): # TODO remove; was consolidated above
+#     """ Convert text lines to parameter dictionary """
+#     PARAMS = {}
+#     lines = [l for l in lines if not l.startswith('#') and len(l) > 0]
+#     for line in lines:
+#         d = line.split(';')[0]  # ";" is the end of the line
+#         k,v = [x.strip() for x in d.split('=')]   # "=" splits keys and values
+#         if v.startswith('[') and v.endswith(']'): # values in brackets are lists
+#             val = []
+#             for x in v[1:-1].split(','):
+#                 try: x2 = float(x.strip())
+#                 except: x2 = str(x.strip())
+#                 val.append(x2)
+#             #val = [float(x.strip()) for x in v[1:-1].split(',')]
+#         else:
+#             try    : val = float(v)  # if value is numerical, store as float
+#             except : val = str(v)    # otherwise, store as string
+#         if   val == 'True'  : val = True  # convert "True"/"False" strings to boolean
+#         elif val == 'False' : val = False
+#         PARAMS[k] = val
+#     return PARAMS
+
+def read_param_file(filepath='default_params.txt', return_none=True): # KNE removed exclude_fs
+    """
+    Return dictionary of parameters loaded from .txt file at <filepath>
+    """
+    # Try to read in the file at "filepath" and parse into a key: value dictionary
+    try:
+        assert os.path.exists(filepath) and os.path.isfile(filepath) # Check the filepath points to a real file
+        param_dict = param_txt_to_dict(filepath)
     except:
         return None, []
-   # check for missing/invalid parameters
-    is_valid, valid_ddict = validate_params(PARAMS)
+    
+   # Check for missing/invalid parameters
+    is_valid, valid_ddict = validate_params(param_dict)
+    
     if is_valid:
-        if exclude_fs: _ = PARAMS.pop('lfp_fs')
-        return PARAMS, []  # return parameter dictionary and empty list
+        return param_dict, []  # return parameter dictionary and empty list
     else:
         invalid_params = [k for k,v in valid_ddict.items() if v==False]
         if return_none:  # return None and list of invalid parameters
             return None, invalid_params  
         else:            # return loaded params and list of invalid params
-            return PARAMS, invalid_params
+            return param_dict, invalid_params
 
 def write_param_file(PARAMS, filepath='default_params.txt'):
     """ Write parameter dictionary to .txt file """
@@ -392,13 +445,15 @@ class SpinboxLfpFS(Spinbox):
     
     def check_downsampling_factor(self):
         """ Check if original FS is a multiple of the downsampled FS """
-        if self.fs is None: return
-        lfp_fs = self.box.value()
-        #ds_factor = self.fs / lfp_fs
-        #x = (self.fs/lfp_fs != int(self.fs/lfp_fs))
-        x = self.fs < lfp_fs
-        tt = f'WARNING: Downsampled FS cannot be greater than the original sampling rate ({self.fs:.2f}).'
-        self.set_warning(x, tooltip=tt)
+        if self.fs is None: 
+            return
+        else:
+            lfp_fs = self.box.value()
+            #ds_factor = self.fs / lfp_fs
+            #x = (self.fs/lfp_fs != int(self.fs/lfp_fs))
+            x = self.fs < lfp_fs
+            tt = f'WARNING: Downsampled FS cannot be greater than the original sampling rate ({self.fs:.2f}).'
+            self.set_warning(x, tooltip=tt)
     
     def set_fs(self, fs):
         """ Update original recording FS """
@@ -614,7 +669,7 @@ class SpinboxTimeRange(SpinboxRange):
         self.range_updated(self.box0, block=True)
         self.enable_disable_toggles()
 
-
+# Used below in ParamObject
 class Combobox(BaseParamWidget):
     """ QComboBox for categorical parameters (e.g. clustering algorithms) """
     
@@ -690,7 +745,7 @@ class ParamObject(QtWidgets.QWidget):
         self.gen_layout()
         self.init_widgets()
         self.set_mode(mode)
-        self.update_gui_from_ddict(params)
+        self.update_gui_from_param_dict(params)
         self.connect_signals()
         
     def gen_layout(self):
@@ -702,7 +757,7 @@ class ParamObject(QtWidgets.QWidget):
         ####################
         
         ### signal_processing
-        self.lfp_fs = SpinboxLfpFS(key='lfp_fs', minimum=1, decimals=1, 
+        self.lfp_fs = SpinboxLfpFS(key='lfp_fs', minimum=1, decimals=10, 
                                    step=0.5, suffix=' Hz')
         self.trange = SpinboxTimeRange(key='trange', double=True, decimals=0,
                                        minimum=-999999, maximum=999999, 
@@ -868,7 +923,7 @@ class ParamObject(QtWidgets.QWidget):
                 ddict[k] = [bool(item.cbox.warning)]
         return ddict
         
-    def ddict_from_gui(self):
+    def get_param_dict_from_gui(self):
         """ Return GUI widget values as parameter dictionary """
         ddict = {}
         invalid = []
@@ -882,7 +937,7 @@ class ParamObject(QtWidgets.QWidget):
                 invalid.append(key)
         return ddict, invalid
     
-    def update_gui_from_ddict(self, ddict):#, block=False):
+    def update_gui_from_param_dict(self, ddict):#, block=False):
         """ Set GUI widget values from parameter dictionary """
         self.DDICT_ORIG = dict(ddict)
         # check for valid $ddict values for each current param (e.g. lfp_fs:False, trange=True)
@@ -902,7 +957,7 @@ class ParamObject(QtWidgets.QWidget):
         # B) user uploads a new set of params -> validity depends on the content
         # * try to prevent emit_signal during B
         self.sender().set_widget_valid(True)
-        PARAMS, invalid = self.ddict_from_gui()
+        PARAMS, invalid = self.get_param_dict_from_gui()
         self.update_signal.emit(PARAMS, invalid)
     
     def set_mode(self, mode='all'):
@@ -931,17 +986,17 @@ class ParamObject(QtWidgets.QWidget):
             item.update_param(val)
             item.set_widget_valid(True)
 
-
-class ParameterScroll(QtWidgets.QScrollArea):
-    """ Embed main parameter interface inside scroll area """
-    def __init__(self, params={}, mode='all', parent=None):
-        super().__init__(parent=parent)
-        self.main_widget = ParamObject(params, mode=mode)
-        inner_widget = pyfx.get_widget_container('v', self.main_widget, 
-                                                 cm=None, widget='widget')
-        self.horizontalScrollBar().hide()
-        self.setWidgetResizable(True)
-        self.setWidget(inner_widget)
+# Never called
+# class ParameterScroll(QtWidgets.QScrollArea):
+#     """ Embed main parameter interface inside scroll area """
+#     def __init__(self, params={}, mode='all', parent=None):
+#         super().__init__(parent=parent)
+#         self.main_widget = ParamObject(params, mode=mode)
+#         inner_widget = pyfx.get_widget_container('v', self.main_widget, 
+#                                                  cm=None, widget='widget')
+#         self.horizontalScrollBar().hide()
+#         self.setWidgetResizable(True)
+#         self.setWidget(inner_widget)
         
         
             

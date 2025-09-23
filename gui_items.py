@@ -20,8 +20,9 @@ import QSS
 import pyfx
 import qparam
 import ephys
-import data_processing as dp
+import data_processing as dp # not used
 import resources_rc
+import resources_v2
 
 
 ##############################################################################
@@ -56,24 +57,25 @@ class ComboBox(QtWidgets.QComboBox):
         # draw the icon and text
         painter.drawControl(QtWidgets.QStyle.CE_ComboBoxLabel, opt)
         
-        
-class SpinBoxDelegate(QtWidgets.QStyledItemDelegate):
-    """ Edit value of QTableView cell using a spinbox widget """
+
+# Never called
+# class SpinBoxDelegate(QtWidgets.QStyledItemDelegate):
+#     """ Edit value of QTableView cell using a spinbox widget """
     
-    def createEditor(self, parent, option, index):
-        """ Create spinbox for table cell """
-        spinbox = QtWidgets.QSpinBox(parent)
-        spinbox.valueChanged.connect(lambda: self.commitData.emit(spinbox))
-        return spinbox
+#     def createEditor(self, parent, option, index):
+#         """ Create spinbox for table cell """
+#         spinbox = QtWidgets.QSpinBox(parent)
+#         spinbox.valueChanged.connect(lambda: self.commitData.emit(spinbox))
+#         return spinbox
     
-    def setEditorData(self, editor, index):
-        """ Initialize spinbox value from model data """
-        editor.setValue(index.data())
+#     def setEditorData(self, editor, index):
+#         """ Initialize spinbox value from model data """
+#         editor.setValue(index.data())
     
-    def setModelData(self, editor, model, index):
-        """ Update model data with new spinbox value """
-        if editor.value() != index.data():
-            model.setData(index, editor.value(), QtCore.Qt.EditRole)
+#     def setModelData(self, editor, model, index):
+#         """ Update model data with new spinbox value """
+#         if editor.value() != index.data():
+#             model.setData(index, editor.value(), QtCore.Qt.EditRole)
 
 
 class LabeledWidget(QtWidgets.QWidget):
@@ -172,41 +174,41 @@ class LabeledPushbutton(LabeledWidget):
         """ Set button to "check" mode (True) or "click" mode (False) """
         self.qw.setCheckable(x)
 
-
-class SpinboxRange(QtWidgets.QWidget):
-    """ Linked pair of spinboxes representing a numeric range """
-    range_changed_signal = QtCore.pyqtSignal()
+# Never called
+# class SpinboxRange(QtWidgets.QWidget):
+#     """ Linked pair of spinboxes representing a numeric range """
+#     range_changed_signal = QtCore.pyqtSignal()
     
-    def __init__(self, double=False, alignment=QtCore.Qt.AlignLeft, parent=None, **kwargs):
-        super().__init__(parent)
-        if double:
-            self.box0 = QtWidgets.QDoubleSpinBox()
-            self.box1 = QtWidgets.QDoubleSpinBox()
-        else:
-            self.box0 = QtWidgets.QSpinBox()
-            self.box1 = QtWidgets.QSpinBox()
-        for box in [self.box0, self.box1]:
-            box.setAlignment(alignment)
-            if 'suffix' in kwargs: box.setSuffix(kwargs['suffix'])
-            if 'minimum' in kwargs: box.setMinimum(kwargs['minimum'])
-            if 'maximum' in kwargs: box.setMaximum(kwargs['maximum'])
-            if 'decimals' in kwargs: box.setDecimals(kwargs['decimals'])
-            if 'step' in kwargs: box.setSingleStep(kwargs['step'])
-            box.valueChanged.connect(lambda: self.range_changed_signal.emit())
+#     def __init__(self, double=False, alignment=QtCore.Qt.AlignLeft, parent=None, **kwargs):
+#         super().__init__(parent)
+#         if double:
+#             self.box0 = QtWidgets.QDoubleSpinBox()
+#             self.box1 = QtWidgets.QDoubleSpinBox()
+#         else:
+#             self.box0 = QtWidgets.QSpinBox()
+#             self.box1 = QtWidgets.QSpinBox()
+#         for box in [self.box0, self.box1]:
+#             box.setAlignment(alignment)
+#             if 'suffix' in kwargs: box.setSuffix(kwargs['suffix'])
+#             if 'minimum' in kwargs: box.setMinimum(kwargs['minimum'])
+#             if 'maximum' in kwargs: box.setMaximum(kwargs['maximum'])
+#             if 'decimals' in kwargs: box.setDecimals(kwargs['decimals'])
+#             if 'step' in kwargs: box.setSingleStep(kwargs['step'])
+#             box.valueChanged.connect(lambda: self.range_changed_signal.emit())
             
-        self.dash = QtWidgets.QLabel(' — ')
-        self.dash.setAlignment(QtCore.Qt.AlignCenter)
+#         self.dash = QtWidgets.QLabel(' — ')
+#         self.dash.setAlignment(QtCore.Qt.AlignCenter)
         
-        self.layout = QtWidgets.QHBoxLayout(self)
-        self.layout.setContentsMargins(0,0,0,0)
-        self.layout.setSpacing(0)
-        self.layout.addWidget(self.box0, stretch=2)
-        self.layout.addWidget(self.dash, stretch=0)
-        self.layout.addWidget(self.box1, stretch=2)
+#         self.layout = QtWidgets.QHBoxLayout(self)
+#         self.layout.setContentsMargins(0,0,0,0)
+#         self.layout.setSpacing(0)
+#         self.layout.addWidget(self.box0, stretch=2)
+#         self.layout.addWidget(self.dash, stretch=0)
+#         self.layout.addWidget(self.box1, stretch=2)
     
-    def get_values(self):
-        """ Return values for both spinboxes """
-        return [self.box0.value(), self.box1.value()]
+#     def get_values(self):
+#         """ Return values for both spinboxes """
+#         return [self.box0.value(), self.box1.value()]
     
 
 ##############################################################################
@@ -352,8 +354,8 @@ class StatusIcon(QtWidgets.QPushButton):
                             'QPushButton:selected,'
                             'QPushButton:disabled,'
                             'QPushButton:pressed {'
-                            'background-color: none;'
-                               'border: none;'
+                            'background-color: yellow;'
+                               'border: yellow;'
                                'color: none;}')
     def new_status(self, x):
         """ Update icon for given status $x """
@@ -512,14 +514,14 @@ class AddChannelWidget(QtWidgets.QWidget):
 ##############################################################################
 ##############################################################################
 
-
+# TODO make ppath_btn match "set paths" buttons ss
 class FileSelectionWidget(QtWidgets.QWidget):
     """ Base widget for interactive file selection and validation """
     
     signal = QtCore.pyqtSignal(bool)
     VALID_PPATH = False
-    le_styledict = {'QLineEdit' : {'border-width' : '2px',
-                                   'border-style' : 'groove',
+    le_styledict = {'QLineEdit' : {'border-width' : '3px',
+                                   'border-style' : 'solid',
                                    'border-color' : '%s',
                                    'padding' : '0px'},
                     'QLineEdit:disabled' : {'border-color' : 'gainsboro'}}
@@ -532,15 +534,18 @@ class FileSelectionWidget(QtWidgets.QWidget):
         self.le = QtWidgets.QLineEdit()          # filepath
         self.le.setTextMargins(0,4,0,4)
         self.le.setReadOnly(True)
-        self.ppath_btn = QtWidgets.QPushButton() # file dialog launch button
-        self.ppath_btn.setIcon(QtGui.QIcon(':/icons/folder.png'))
-        self.ppath_btn.setMinimumSize(30,30)
-        self.ppath_btn.setIconSize(QtCore.QSize(20,20))
+
+        # Create button for launching a file dialog
+        self.ppath_btn = QtWidgets.QPushButton()
+        self.ppath_btn.setIcon(QtGui.QIcon(':/resources/folder.png'))
+        self.ppath_btn.setMinimumSize(40,40)
+        self.ppath_btn.setIconSize(QtCore.QSize(30,30))
         self.ppath_btn.setFocusPolicy(QtCore.Qt.NoFocus)
         
         top_row = pyfx.get_widget_container('h', self.icon_btn, self.ppath_lbl, stretch_factors=[0,2])
         bottom_row = pyfx.get_widget_container('h', self.le, self.ppath_btn, stretch_factors=[2,0])
-        self.vlay = pyfx.get_widget_container('v', top_row, bottom_row, spacing=5)
+        bottom_row.setSpacing(5) # Add some spacing between the QLineEdit and the QPushButton w/ the folder icon
+        self.vlay = pyfx.get_widget_container('v', top_row, bottom_row, spacing=10)
         self.setLayout(self.vlay)
         
     def get_init_ddir(self):
@@ -552,7 +557,7 @@ class FileSelectionWidget(QtWidgets.QWidget):
     
     def update_filepath(self, ppath):
         """ Handle selection of a new filepath """
-        x = self.validate_ppath(ppath)
+        x = self.validate_path(ppath)
         if x is None: return  # keep current filepath
         # update QLineEdit text and border color
         self.le.setText(ppath)
@@ -561,12 +566,12 @@ class FileSelectionWidget(QtWidgets.QWidget):
     
     def update_status(self, x):
         """ Update widget state with "valid" or "invalid" filepath """
-        c = ['maroon','darkgreen'][int(x)]
+        c = ['#991F08','darkgreen'][int(x)]
         self.le.setStyleSheet(pyfx.dict2ss(self.le_styledict) % c)
         self.icon_btn.new_status(x)  # update status icon
         self.VALID_PPATH = bool(x)
     
-    def validate_ppath(self, ppath):
+    def validate_path(self, ppath):
         """ Check if filepath meets some criteria (see subclasses) """
         return True
 
@@ -719,35 +724,36 @@ class MsgboxError(Msgbox):
         # pop-up messagebox appears when save is complete
         self.setIcon(QtWidgets.QMessageBox.Critical)
         self.setStandardButtons(QtWidgets.QMessageBox.Close)
-        
-class MsgboxInvalid(MsgboxError):
-    """ Error Messagebox for invalid file """
-    def __init__(self, msg='Invalid file!', sub_msg='', title='', parent=None):
-        super().__init__(msg, sub_msg, title, parent)
+
+# Never called
+# class MsgboxInvalid(MsgboxError):
+#     """ Error Messagebox for invalid file """
+#     def __init__(self, msg='Invalid file!', sub_msg='', title='', parent=None):
+#         super().__init__(msg, sub_msg, title, parent)
     
-    @classmethod
-    def invalid_file(cls, filepath='', filetype='probe', parent=None):
-        fopts =  ['probe', 'param', 'array']
-        assert filetype in fopts
-        ftxt = ['PROBE','PARAMETER','DATA'][fopts.index(filetype)]
-        sub_msg = ''
-        #findme
-        if not os.path.isfile(filepath):
-            msg = f'<h3><u>{ftxt} FILE DOES NOT EXIST</u>:</h3><br><nobr><code>{filepath}</code></nobr>'
-        else:
-            msg = f'<h3><u>INVALID {ftxt} FILE</u>:</h3><br><nobr><code>{filepath}</code></nobr>'
-            if filetype == 'param':
-                params, invalid_keys = qparam.read_param_file(filepath)
-                sub_msg = f'<hr><code><u>MISSING PARAMS</u>: {", ".join(invalid_keys)}</code>'
-        # launch messagebox
-        msgbox = cls(msg=msg, sub_msg=sub_msg, parent=parent)
-        msgbox.show()
-        msgbox.raise_()
-        res = msgbox.exec()
-        if res == QtWidgets.QMessageBox.Open:
-            return True   # keep file dialog open for another selection
-        elif res == QtWidgets.QMessageBox.Close:
-            return False  # close file dialog
+#     @classmethod
+#     def invalid_file(cls, filepath='', filetype='probe', parent=None):
+#         fopts =  ['probe', 'param', 'array']
+#         assert filetype in fopts
+#         ftxt = ['PROBE','PARAMETER','DATA'][fopts.index(filetype)]
+#         sub_msg = ''
+#         #findme
+#         if not os.path.isfile(filepath):
+#             msg = f'<h3><u>{ftxt} FILE DOES NOT EXIST</u>:</h3><br><nobr><code>{filepath}</code></nobr>'
+#         else:
+#             msg = f'<h3><u>INVALID {ftxt} FILE</u>:</h3><br><nobr><code>{filepath}</code></nobr>'
+#             if filetype == 'param':
+#                 params, invalid_keys = qparam.read_param_file(filepath)
+#                 sub_msg = f'<hr><code><u>MISSING PARAMS</u>: {", ".join(invalid_keys)}</code>'
+#         # launch messagebox
+#         msgbox = cls(msg=msg, sub_msg=sub_msg, parent=parent)
+#         msgbox.show()
+#         msgbox.raise_()
+#         res = msgbox.exec()
+#         if res == QtWidgets.QMessageBox.Open:
+#             return True   # keep file dialog open for another selection
+#         elif res == QtWidgets.QMessageBox.Close:
+#             return False  # close file dialog
     
 
 class MsgboxWarning(Msgbox):
@@ -806,7 +812,8 @@ class MsgboxWarning(Msgbox):
             return False  # abort close attempt
         elif res == QtWidgets.QMessageBox.Save:
             return -1     # save changes and then close
-        
+
+# Never called
 # class MsgboxParams(Msgbox):
 #     PARAM_FILE = None
 #     def __init__(self, filepath='', title='Select parameter file', parent=None):
@@ -846,54 +853,55 @@ class MsgboxWarning(Msgbox):
 #             self.PARAM_FILE = str(self.param_dlg.SAVE_LOCATION)
 #             self.accept()
 
-class MsgWindow(QtWidgets.QDialog):
-    """ QDialog window masquerading as a messagebox """
-    pixmaps = dict(info     = QtWidgets.QStyle.SP_MessageBoxInformation,
-                   critical = QtWidgets.QStyle.SP_MessageBoxCritical,
-                   warning  = QtWidgets.QStyle.SP_MessageBoxWarning,
-                   question = QtWidgets.QStyle.SP_MessageBoxQuestion,
-                   check    = QtWidgets.QStyle.SP_DialogApplyButton)
+# Never called?
+# class MsgWindow(QtWidgets.QDialog):
+#     """ QDialog window masquerading as a messagebox """
+#     pixmaps = dict(info     = QtWidgets.QStyle.SP_MessageBoxInformation,
+#                    critical = QtWidgets.QStyle.SP_MessageBoxCritical,
+#                    warning  = QtWidgets.QStyle.SP_MessageBoxWarning,
+#                    question = QtWidgets.QStyle.SP_MessageBoxQuestion,
+#                    check    = QtWidgets.QStyle.SP_DialogApplyButton)
     
-    def __init__(self, icon='info', msg='A message!', sub_msg='', 
-                 title='', btns=['Ok','Close'], parent=None):
-        super().__init__(parent=parent)
-        if isinstance(btns, str): btns = [btns]
-        self.setWindowTitle(title)
-        self.icon_btn = QtWidgets.QPushButton()
-        self.icon_btn.setFixedSize(50, 50)
-        self.icon_btn.setFlat(True)
-        pixmap = self.pixmaps.get(str(icon), QtWidgets.QStyle.SP_MessageBoxInformation)
-        qicon = self.style().standardIcon(pixmap)
-        self.icon_btn.setIcon(QtGui.QIcon(qicon))
-        self.icon_btn.setIconSize(QtCore.QSize(40, 40))
-        self.text_label = QtWidgets.QLabel(msg)
-        self.text_label.setAlignment(QtCore.Qt.AlignCenter)
-        self.text_label.setWordWrap(True)
-        #self.text_label.setStyleSheet('QLabel {font-size : 15pt;}')
-        self.subtext_label = QtWidgets.QLabel(sub_msg)
-        self.subtext_label.setAlignment(QtCore.Qt.AlignCenter)
-        #self.subtext_label.setStyleSheet('QLabel {font-size : 12pt;}')
-        if sub_msg == '': self.subtext_label.hide()
-        self.main_grid = QtWidgets.QGridLayout()
-        self.main_grid.addWidget(self.icon_btn, 0, 0, 2, 1)
-        self.main_grid.addWidget(self.text_label, 0, 1)
-        self.main_grid.addWidget(self.subtext_label, 1, 1)
-        self.bbox = QtWidgets.QHBoxLayout()
-        self.accept_btn = QtWidgets.QPushButton(btns[0])
-        self.reject_btn = QtWidgets.QPushButton()
-        if len(btns) > 1: self.reject_btn.setText(btns[1])
-        else            : self.reject_btn.hide()
-        self.bbox.addWidget(self.accept_btn)
-        self.bbox.addWidget(self.reject_btn)
-        self.layout = QtWidgets.QVBoxLayout(self)
-        self.layout.addLayout(self.main_grid)
-        self.layout.addLayout(self.bbox)
+#     def __init__(self, icon='info', msg='A message!', sub_msg='', 
+#                  title='', btns=['Ok','Close'], parent=None):
+#         super().__init__(parent=parent)
+#         if isinstance(btns, str): btns = [btns]
+#         self.setWindowTitle(title)
+#         self.icon_btn = QtWidgets.QPushButton()
+#         self.icon_btn.setFixedSize(50, 50)
+#         self.icon_btn.setFlat(True)
+#         pixmap = self.pixmaps.get(str(icon), QtWidgets.QStyle.SP_MessageBoxInformation)
+#         qicon = self.style().standardIcon(pixmap)
+#         self.icon_btn.setIcon(QtGui.QIcon(qicon))
+#         self.icon_btn.setIconSize(QtCore.QSize(40, 40))
+#         self.text_label = QtWidgets.QLabel(msg)
+#         self.text_label.setAlignment(QtCore.Qt.AlignCenter)
+#         self.text_label.setWordWrap(True)
+#         #self.text_label.setStyleSheet('QLabel {font-size : 15pt;}')
+#         self.subtext_label = QtWidgets.QLabel(sub_msg)
+#         self.subtext_label.setAlignment(QtCore.Qt.AlignCenter)
+#         #self.subtext_label.setStyleSheet('QLabel {font-size : 12pt;}')
+#         if sub_msg == '': self.subtext_label.hide()
+#         self.main_grid = QtWidgets.QGridLayout()
+#         self.main_grid.addWidget(self.icon_btn, 0, 0, 2, 1)
+#         self.main_grid.addWidget(self.text_label, 0, 1)
+#         self.main_grid.addWidget(self.subtext_label, 1, 1)
+#         self.bbox = QtWidgets.QHBoxLayout()
+#         self.accept_btn = QtWidgets.QPushButton(btns[0])
+#         self.reject_btn = QtWidgets.QPushButton()
+#         if len(btns) > 1: self.reject_btn.setText(btns[1])
+#         else            : self.reject_btn.hide()
+#         self.bbox.addWidget(self.accept_btn)
+#         self.bbox.addWidget(self.reject_btn)
+#         self.layout = QtWidgets.QVBoxLayout(self)
+#         self.layout.addLayout(self.main_grid)
+#         self.layout.addLayout(self.bbox)
         
-        self.accept_btn.clicked.connect(self.accept)
-        self.reject_btn.clicked.connect(self.reject)
+#         self.accept_btn.clicked.connect(self.accept)
+#         self.reject_btn.clicked.connect(self.reject)
         
-        self.show()
-        self.raise_()
+#         self.show()
+#         self.raise_()
 
 
 ##############################################################################
@@ -904,6 +912,17 @@ class MsgWindow(QtWidgets.QDialog):
 ##############################################################################
 ##############################################################################
 
+def remove_help_button(object):
+    # Get the current window flags
+    flags = object.windowFlags()
+
+    # Remove the WindowContextHelpButtonHint flag
+    flags &= ~QtCore.Qt.WindowContextHelpButtonHint
+
+    # Set the modified window flags
+    object.setWindowFlags(flags)
+
+# Used
 class Popup(QtWidgets.QDialog):
     """ Simple popup window to display any widget(s) """
     def __init__(self, widgets=[], orientation='v', title='', parent=None):
@@ -921,35 +940,36 @@ class Popup(QtWidgets.QDialog):
         self.move(qrect.topLeft())
 
 
-class MatplotlibPopup(Popup):
-    """ Simple popup window to display Matplotlib figure """
-    def __init__(self, fig, toolbar_pos='top', title='', parent=None):
-        super().__init__(widgets=[], orientation='h', title=title, parent=parent)
-        # create figure and canvas
-        self.fig = fig
-        self.canvas = FigureCanvas(self.fig)
-        # create toolbar
-        if toolbar_pos != 'none':
-            self.toolbar = NavigationToolbar(self.canvas, self)
-        if toolbar_pos in ['top','bottom', 'none']:
-            self.canvas_layout = QtWidgets.QVBoxLayout()
-        elif toolbar_pos in ['left','right']:
-            self.canvas_layout = QtWidgets.QHBoxLayout()
-            self.toolbar.setOrientation(QtCore.Qt.Vertical)
-            self.toolbar.setMaximumWidth(30)
-        # populate layout with canvas and toolbar (if indicated)
-        self.canvas_layout.addWidget(self.canvas)
-        if toolbar_pos != 'none':
-            idx = 0 if toolbar_pos in ['top','left'] else 1
-            self.canvas_layout.insertWidget(idx, self.toolbar)
+# Doesn't appear to be called anywhere; only line with it is commented out
+# class MatplotlibPopup(Popup):
+#     """ Simple popup window to display Matplotlib figure """
+#     def __init__(self, fig, toolbar_pos='top', title='', parent=None):
+#         super().__init__(widgets=[], orientation='h', title=title, parent=parent)
+#         # create figure and canvas
+#         self.fig = fig
+#         self.canvas = FigureCanvas(self.fig)
+#         # create toolbar
+#         if toolbar_pos != 'none':
+#             self.toolbar = NavigationToolbar(self.canvas, self)
+#         if toolbar_pos in ['top','bottom', 'none']:
+#             self.canvas_layout = QtWidgets.QVBoxLayout()
+#         elif toolbar_pos in ['left','right']:
+#             self.canvas_layout = QtWidgets.QHBoxLayout()
+#             self.toolbar.setOrientation(QtCore.Qt.Vertical)
+#             self.toolbar.setMaximumWidth(30)
+#         # populate layout with canvas and toolbar (if indicated)
+#         self.canvas_layout.addWidget(self.canvas)
+#         if toolbar_pos != 'none':
+#             idx = 0 if toolbar_pos in ['top','left'] else 1
+#             self.canvas_layout.insertWidget(idx, self.toolbar)
             
-        #self.layout = QtWidgets.QHBoxLayout()
-        self.layout.addLayout(self.canvas_layout)
-        #self.setLayout(self.layout)
+#         #self.layout = QtWidgets.QHBoxLayout()
+#         self.layout.addLayout(self.canvas_layout)
+#         #self.setLayout(self.layout)
     
-    def closeEvent(self, event):
-        plt.close()
-        self.deleteLater()
+#     def closeEvent(self, event):
+#         plt.close()
+#         self.deleteLater()
         
         
 class ButtonPopup(QtWidgets.QDialog):
@@ -961,7 +981,7 @@ class ButtonPopup(QtWidgets.QDialog):
         for btn in self.btns:
             btn.setStyleSheet(pyfx.dict2ss(QSS.TOGGLE_BTN))
             btn.clicked.connect(self.select_btn)
-        layout = pyfx.get_widget_container(orientation, self.label, 5, *self.btns, cm=None)
+        layout = pyfx.get_widget_container(orientation, self.label, 5, *self.btns, cm=(10, 10, 10, 10)) #HERE
         self.setLayout(layout)
         self.setWindowTitle(title)
         self.show(); self.raise_()
@@ -970,77 +990,79 @@ class ButtonPopup(QtWidgets.QDialog):
         self.result = str(self.sender().text())
         self.accept()
     
-    @classmethod
-    def run(cls, *args, **kwargs):
-        """ Execute button popup """
-        pyfx.qapp()
-        dlg = cls(*args, **kwargs)
-        if dlg.exec():
-            return str(dlg.result)
+    # Might have been a convenience method to quickly test this widget
+    # @classmethod
+    # def run(cls, *args, **kwargs):
+    #     """ Execute button popup """
+    #     print("HERE")
+    #     pyfx.qapp()
+    #     dlg = cls(*args, **kwargs)
+    #     if dlg.exec():
+    #         return str(dlg.result)
         
         
-class AuxDialog(QtWidgets.QDialog):
-    """ Interface for viewing and saving AUX channels (not implemented) """
+# class AuxDialog(QtWidgets.QDialog):
+#     """ Interface for viewing and saving AUX channels (not implemented) """
     
-    def __init__(self, n, parent=None):
-        super().__init__(parent)
+#     def __init__(self, n, parent=None):
+#         super().__init__(parent)
         
-        self.setWindowTitle('AUX channels')
-        self.layout = QtWidgets.QVBoxLayout(self)
-        self.layout.setSpacing(10)
-        qlabel = QtWidgets.QLabel('Set AUX file names (leave blank to ignore)')
-        # load list of previously saved aux files
-        self.auxf = list(np.load('.aux_files.npy'))
-        completer = QtWidgets.QCompleter(self.auxf, self)
-        grid = QtWidgets.QGridLayout()
-        self.qedits = []
-        # create QLineEdit for each AUX channel
-        for i in range(n):
-            lbl = QtWidgets.QLabel(f'AUX {i}')
-            qedit = QtWidgets.QLineEdit()
-            qedit.setCompleter(completer)
-            grid.addWidget(lbl, i, 0)
-            grid.addWidget(qedit, i, 1)
-            self.qedits.append(qedit)
-        # action button
-        bbox = QtWidgets.QHBoxLayout()
-        self.continue_btn = QtWidgets.QPushButton('Continue')
-        self.continue_btn.clicked.connect(self.accept)
-        self.clear_btn = QtWidgets.QPushButton('Clear all')
-        self.clear_btn.clicked.connect(self.clear_files)
-        bbox.addWidget(self.continue_btn)
-        bbox.addWidget(self.clear_btn)
-        # set up layout
-        self.layout.addWidget(qlabel)
-        line = pyfx.DividerLine()
-        self.layout.addWidget(line)
-        self.layout.addLayout(grid)
-        self.layout.addLayout(bbox)
+#         self.setWindowTitle('AUX channels')
+#         self.layout = QtWidgets.QVBoxLayout(self)
+#         self.layout.setSpacing(10)
+#         qlabel = QtWidgets.QLabel('Set AUX file names (leave blank to ignore)')
+#         # load list of previously saved aux files
+#         self.auxf = list(np.load('.aux_files.npy'))
+#         completer = QtWidgets.QCompleter(self.auxf, self)
+#         grid = QtWidgets.QGridLayout()
+#         self.qedits = []
+#         # create QLineEdit for each AUX channel
+#         for i in range(n):
+#             lbl = QtWidgets.QLabel(f'AUX {i}')
+#             qedit = QtWidgets.QLineEdit()
+#             qedit.setCompleter(completer)
+#             grid.addWidget(lbl, i, 0)
+#             grid.addWidget(qedit, i, 1)
+#             self.qedits.append(qedit)
+#         # action button
+#         bbox = QtWidgets.QHBoxLayout()
+#         self.continue_btn = QtWidgets.QPushButton('Continue')
+#         self.continue_btn.clicked.connect(self.accept)
+#         self.clear_btn = QtWidgets.QPushButton('Clear all')
+#         self.clear_btn.clicked.connect(self.clear_files)
+#         bbox.addWidget(self.continue_btn)
+#         bbox.addWidget(self.clear_btn)
+#         # set up layout
+#         self.layout.addWidget(qlabel)
+#         line = pyfx.DividerLine()
+#         self.layout.addWidget(line)
+#         self.layout.addLayout(grid)
+#         self.layout.addLayout(bbox)
     
-    def update_files(self):
-        for i,qedit in enumerate(self.qedits):
-            txt = qedit.text()
-            if txt != '':
-                if not txt.endswith('.npy'):
-                    txt += '.npy'
-            self.aux_files[i] = txt
+#     def update_files(self):
+#         for i,qedit in enumerate(self.qedits):
+#             txt = qedit.text()
+#             if txt != '':
+#                 if not txt.endswith('.npy'):
+#                     txt += '.npy'
+#             self.aux_files[i] = txt
     
-    def clear_files(self):
-        for qedit in self.qedits:
-            qedit.setText('')
+#     def clear_files(self):
+#         for qedit in self.qedits:
+#             qedit.setText('')
     
-    def accept(self):
-        self.aux_files = []
-        for qedit in self.qedits:
-            txt = qedit.text()
-            if txt.endswith('.npy'):
-                txt = txt[0:-4]
-            if txt not in self.auxf:
-                self.auxf.append(txt)
-            fname = txt + ('' if txt == '' else '.npy')
-            self.aux_files.append(fname)
-        np.save('.aux_files.npy', self.auxf)
-        super().accept()
+#     def accept(self):
+#         self.aux_files = []
+#         for qedit in self.qedits:
+#             txt = qedit.text()
+#             if txt.endswith('.npy'):
+#                 txt = txt[0:-4]
+#             if txt not in self.auxf:
+#                 self.auxf.append(txt)
+#             fname = txt + ('' if txt == '' else '.npy')
+#             self.aux_files.append(fname)
+#         np.save('.aux_files.npy', self.auxf)
+#         super().accept()
         
 
 ##############################################################################
@@ -1321,307 +1343,71 @@ class SpinnerWindow(QtWidgets.QWidget):
 ##############################################################################
 ##############################################################################
 
-
-class BaseFolderWidget(QtWidgets.QWidget):
-    """ Base folders GUI for adjusting default data locations and files """
+# TODO remove
+# class RawMeta(QtWidgets.QWidget):
+#     meta = dict.fromkeys(['ElectricalSeries','FS','nsamples','duration','total_ch','ch_names'])
     
-    path_updated_signal = QtCore.pyqtSignal(int)
-    saved_signal = QtCore.pyqtSignal()
+#     def __init__(self, recording=None, parent=None):
+#         super().__init__(parent)
+#         self.gen_layout()
+#         self.update_recording(recording)
     
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.BASE_FOLDERS, self.flabels = self.init_folders()
-        self.gen_layout()
-        self.connect_signals()
+#     def gen_layout(self):
+#         self.qform = QtWidgets.QFormLayout(self)
+#         self.qform.setContentsMargins(11,0,11,0)
+#         self.meta_w = {}
+#         self.meta_w['ElectricalSeries'] = QtWidgets.QLineEdit()
+#         self.meta_w['FS']       = QtWidgets.QLineEdit()
+#         self.meta_w['nsamples'] = QtWidgets.QLineEdit()
+#         self.meta_w['duration'] = QtWidgets.QLineEdit()
+#         self.meta_w['total_ch'] = QtWidgets.QLineEdit()
+#         self.meta_w['ch_names'] = QtWidgets.QPlainTextEdit()
+#         for k,mw in self.meta_w.items():
+#             mw.setReadOnly(True)
+#             self.qform.addRow(k+':', mw)
+#         # te_w = self.meta_w['FS'].sizeHint().width()
+#         # te_h = self.meta_w['ch_names'].sizeHint().height()
+#         # self.meta_w['ch_names'].sizeHint = lambda: QtCore.QSize(te_w, te_h)
+#         # hide channel names
+#         self.qform.itemAt(5, QtWidgets.QFormLayout.LabelRole).widget().setVisible(False)
+#         self.qform.itemAt(5, QtWidgets.QFormLayout.FieldRole).widget().setVisible(False)
     
-    def init_folders(self):
-        BASE_FOLDERS = [str(x) for x in ephys.base_dirs()]
-        flabels = ['Raw Data Folder', 'Probe Configuration Folder',
-                        'Default Probe File', 'Parameter File']
-        return BASE_FOLDERS, flabels
-        
-    def makebtn(self, icon):
-        """ Return icon button """
-        btn = QtWidgets.QPushButton()
-        btn.setFocusPolicy(QtCore.Qt.NoFocus)
-        btn.setFixedSize(30,30)
-        btn.setIcon(icon)
-        btn.setIconSize(QtCore.QSize(20,20))
-        return btn
+#     def update_recording(self, recording):
+#         self.recording = recording
+#         if self.recording is None:
+#             self.meta = dict.fromkeys(list(self.meta.keys()))
+#         else:
+#             self.meta['FS'] = self.recording.get_sampling_frequency()
+#             self.meta['nsamples'] = self.recording.get_num_samples()
+#             self.meta['duration'] = self.recording.get_duration()
+#             self.meta['ch_names'] = self.recording.get_channel_ids().astype('str')
+#             self.meta['total_ch'] = len(self.meta['ch_names'])
+#             is_nwb = self.recording.__class__.__name__ == 'NwbRecordingExtractor'
+#             if is_nwb:
+#                 es_name = os.path.basename(self.recording.electrical_series_path)
+#                 self.meta['ElectricalSeries'] = es_name
+#             else:
+#                 self.meta['ElectricalSeries'] = None
+#         self.update_gui_from_ddict(self.meta)
+#         #txt = os.linesep.join([f'{k} = {v}' for k,v in self.meta.items()])
+#         #self.setPlainText(txt)
+#         #self.setVisible(self.recording is not None)
     
-    def makerow(self, i, icon2=None):
-        """ Return widgets for a given row """
-        ppath_label_ss = ('QLabel {background-color:white;'
-                                  'border:1px solid gray;'
-                                  'border-radius:4px;'
-                                  'padding:5px;}')
-        # create filepath label
-        ppath_label = QtWidgets.QLabel(f'<code>{self.BASE_FOLDERS[i]}</code>')
-        ppath_label.setStyleSheet(ppath_label_ss)
-        # create title and button
-        qlabel = QtWidgets.QLabel(f'<b>{self.flabels[i]}</b>')
-        ftype = self.flabels[i].split(' ')[-1].lower() # "folder" or "file"
-        url = f':/icons/{dict(folder="folder", file="load")[ftype]}.png'
-        res = (ppath_label,btn) = [ppath_label, self.makebtn(QtGui.QIcon(url))]
-        if icon2 is not None: # add a second button
-            res.append(self.makebtn(QtGui.QIcon(f':/icons/{icon2}.png')))
-        row1 = pyfx.get_widget_container('h', *res, spacing=5)
-        
-        #if i==2: res.append(self.makebtn(QtGui.QIcon(':/icons/trash.png')))
-        #if i==3: res.append(self.makebtn(QtGui.QIcon(':/icons/load_txt.png')))
-        w = pyfx.get_widget_container('v', qlabel, row1, spacing=2,
-                                      widget='widget', cm=None)
-        return res, w
-    
-    def gen_layout(self):
-        """ Set up layout """
-        # create folder labels and selection buttons
-        #(self.raw_ppath_label, self.raw_btn), self.raw_w = self.makerow(0)
-        (self.raw_ppath_label, self.raw_btn), self.raw_w = self.makerow(0)
-        (self.prb_ppath_label, self.prb_btn), self.prb_w = self.makerow(1)
-        (self.prbf_ppath_label, self.prbf_btn, self.prbf_clear), self.prbf_w = self.makerow(2, 'trash')
-        (self.param_ppath_label, self.param_btn, self.param_auto), self.param_w = self.makerow(3, 'load_txt')
-        self.param_auto.setToolTip('<big>Auto-generate parameter file from default values.</big>')
-        self.ppath_labels = [self.raw_ppath_label, self.prb_ppath_label,
-                             self.prbf_ppath_label, self.param_ppath_label]
-        layout = pyfx.get_widget_container('v', self.raw_w, self.prb_w, self.prbf_w, 
-                                           self.param_w, spacing=20)
-        self.setLayout(layout)
-        # action buttons
-        self.save_btn = QtWidgets.QPushButton('Save')
-        #self.save_btn.setStyleSheet(blue_btn_ss)
-        self.save_btn.setEnabled(False)
-    
-    def connect_signals(self):
-        """ Connect GUI inputs """
-        self.raw_btn.clicked.connect(lambda: self.choose_base_ddir(0))
-        self.prb_btn.clicked.connect(lambda: self.choose_base_ddir(1))
-        self.prbf_btn.clicked.connect(self.choose_probe_file)
-        self.param_btn.clicked.connect(self.choose_param_file)
-        self.prbf_clear.clicked.connect(self.clear_probe_file)
-        self.param_auto.clicked.connect(self.auto_param_file)
-        self.path_updated_signal.connect(lambda i: self.update_base_ddir(i))
-        self.save_btn.clicked.connect(self.save_base_folders)
-    
-    def choose_base_ddir(self, i):
-        """ Select base folder for raw data or probe config files """
-        init_ddir = str(self.BASE_FOLDERS[i])
-        fmt = 'Base folder for %s'
-        titles = [fmt % x for x in ['raw data', 'probe files']]
-        # when activated, initialize at ddir and save new base folder at index i
-        ddir = ephys.select_directory(init_ddir, title=titles[i], parent=self)
-        if ddir:
-            self.BASE_FOLDERS[i] = str(ddir)
-            self.path_updated_signal.emit(i)
-    
-    def choose_probe_file(self):
-        """ Select default probe file """
-        init_ppath = str(self.BASE_FOLDERS[2])
-        if not os.path.isfile(init_ppath):
-            init_ppath = str(self.BASE_FOLDERS[1])
-        probe, fpath = ephys.select_load_probe_file(init_ppath=init_ppath, parent=self)
-        if probe is not None:
-            self.BASE_FOLDERS[2] = str(fpath)
-            self.path_updated_signal.emit(2)
-        
-    def clear_probe_file(self):
-        """ Clear default probe file """
-        self.BASE_FOLDERS[2] = ''
-        self.path_updated_signal.emit(2)
-    
-    def choose_param_file(self):
-        """ Select parameter file """
-        init_ppath = str(self.BASE_FOLDERS[3])
-        param_dict, fpath = ephys.select_load_param_file(init_ppath=init_ppath, parent=self)
-        if param_dict is not None:
-            self.BASE_FOLDERS[3] = str(fpath)
-            self.path_updated_signal.emit(3)
+#     def update_gui_from_ddict(self, ddict):
+#         if ddict['FS'] is None:
+#             for mw in self.meta_w.values():
+#                 mw.clear()
+#         else:
+#             self.meta_w['FS'].setText(f"{ddict['FS']:.1f} Hz")
+#             self.meta_w['nsamples'].setText(f"{ddict['nsamples']:.0f}")
+#             self.meta_w['duration'].setText(f"{ddict['duration']:.2f} s")
+#             self.meta_w['total_ch'].setText(f"{ddict['total_ch']:.0f}")
+#             self.meta_w['ch_names'].setPlainText(str(ddict['ch_names'])[1:-1])
+#             es_name = ddict['ElectricalSeries']
+#             is_nwb = bool(es_name is not None)
+#             self.meta_w['ElectricalSeries'].setText(f'{str(es_name)}')
+#             self.qform.itemAt(0, QtWidgets.QFormLayout.LabelRole).widget().setVisible(is_nwb)
+#             self.qform.itemAt(0, QtWidgets.QFormLayout.FieldRole).widget().setVisible(is_nwb)
             
-    def auto_param_file(self):
-        """ Save new parameter file with default values """
-        fpath = ephys.select_save_param_file(qparam.get_original_defaults(), 
-                                             title='Save default parameter file',
-                                             parent=self)
-        if fpath:
-            self.BASE_FOLDERS[3] = str(fpath)
-            self.path_updated_signal.emit(3)
-            
-    def update_base_ddir(self, i):
-        """ Update filepath text to the selected location """
-        txt = f'<code>{self.BASE_FOLDERS[i]}</code>'
-        self.ppath_labels[i].setText(txt)
-        self.save_btn.setEnabled(True)
-    
-    def save_base_folders(self):
-        """ Save filepaths to "default_folders.txt" """
-        ddir_list = list(self.BASE_FOLDERS)
-        ephys.write_base_dirs(ddir_list)
-        self.saved_signal.emit()
-    
-    
-class BaseFolderPopup(QtWidgets.QDialog):
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle('Base Folders')
-        self.widget = BaseFolderWidget()
-        self.widget.saved_signal.connect(self.accept)
-        bbox = QtWidgets.QHBoxLayout()
-        bbox.addWidget(self.widget.save_btn)
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.addWidget(self.widget)
-        layout.addLayout(bbox)
-        
 
-class ParameterPopup(QtWidgets.QDialog):
-    """ Settings GUI for editing and saving parameter values """
-    
-    SAVE_LOCATION = None
-    
-    def __init__(self, ddict, mode='all', hide_params=['el_shape','el_area','el_h'], 
-                 parent=None):
-        super().__init__(parent)
-        # initialize parameter input widget
-        self.main_widget = qparam.ParamObject(ddict, mode=mode)
-        for param in hide_params:
-            if param in self.main_widget.ROWS.keys():
-                self.main_widget.ROWS[param].hide()
-        
-        self.PARAMS, _ = self.main_widget.ddict_from_gui()
-        self.PARAMS_ORIG = dict(self.PARAMS)
-        
-        self.gen_layout()
-        self.connect_signals()
-        self.setWindowTitle('Input Parameters')
-        
-    def gen_layout(self):
-        """ Set up layout """
-        # embed main parameter widget in scroll area
-        self.main_widget.setContentsMargins(0,0,15,0)
-        self.qscroll = QtWidgets.QScrollArea()
-        self.qscroll.horizontalScrollBar().hide()
-        self.qscroll.setWidgetResizable(True)
-        self.qscroll.setWidget(self.main_widget)
-        left_hash = QtWidgets.QLabel('##########')
-        right_hash = QtWidgets.QLabel('##########')
-        title = QtWidgets.QLabel('Parameters')
-        for lbl in [left_hash, right_hash, title]:
-            lbl.setAlignment(QtCore.Qt.AlignCenter)
-            lbl.setStyleSheet('QLabel {'
-                              'font-size : 14pt;'
-                              'font-weight : bold;'
-                              'text-decoration : none;'
-                              '}')
-        bbox = QtWidgets.QHBoxLayout()
-        self.save_btn = QtWidgets.QPushButton('Save')
-        self.save_btn.setAutoDefault(False)
-        #self.save_btn.setEnabled(False)
-        self.reset_btn = QtWidgets.QPushButton('Reset parameters')
-        self.reset_btn.setAutoDefault(False)
-        self.reset_btn.setEnabled(False)
-        bbox.addWidget(self.save_btn)
-        bbox.addWidget(self.reset_btn)
-        
-        self.layout = QtWidgets.QVBoxLayout(self)
-        #self.layout.setSpacing(20)
-        self.layout.addWidget(self.qscroll, stretch=2)
-        self.layout.addLayout(bbox, stretch=0)
-    
-    def connect_signals(self):
-        """ Connect widget signals to functions """
-        self.main_widget.update_signal.connect(self.update_slot)
-        self.save_btn.clicked.connect(self.save_param_file)
-        self.reset_btn.clicked.connect(self.reset_params)
-    
-    def update_slot(self, PARAMS):
-        """ Update parameter dictionary based on user input """
-        self.PARAMS.update(PARAMS)
-        x = not all([self.PARAMS[k] == self.PARAMS_ORIG[k] for k in PARAMS.keys()])
-        #self.save_btn.setEnabled(x)
-        self.reset_btn.setEnabled(x)
-    
-    def reset_params(self):
-        """ Reset parameters to original values """
-        self.main_widget.update_gui_from_ddict(self.PARAMS_ORIG)
-        #self.save_btn.setEnabled(False)
-        self.reset_btn.setEnabled(False)
-    
-    def save_param_file(self):
-        fpath = ephys.select_save_param_file(self.PARAMS, parent=self)
-        if fpath:
-            self.SAVE_LOCATION = fpath
-            self.accept()
-
-class RawMeta(QtWidgets.QWidget):
-    meta = dict.fromkeys(['ElectricalSeries','FS','nsamples','duration','total_ch','ch_names'])
-    
-    def __init__(self, recording=None, parent=None):
-        super().__init__(parent)
-        self.gen_layout()
-        self.update_recording(recording)
-    
-    def gen_layout(self):
-        self.qform = QtWidgets.QFormLayout(self)
-        self.qform.setContentsMargins(11,0,11,0)
-        self.meta_w = {}
-        self.meta_w['ElectricalSeries'] = QtWidgets.QLineEdit()
-        self.meta_w['FS']       = QtWidgets.QLineEdit()
-        self.meta_w['nsamples'] = QtWidgets.QLineEdit()
-        self.meta_w['duration'] = QtWidgets.QLineEdit()
-        self.meta_w['total_ch'] = QtWidgets.QLineEdit()
-        self.meta_w['ch_names'] = QtWidgets.QPlainTextEdit()
-        for k,mw in self.meta_w.items():
-            mw.setReadOnly(True)
-            self.qform.addRow(k+':', mw)
-        # te_w = self.meta_w['FS'].sizeHint().width()
-        # te_h = self.meta_w['ch_names'].sizeHint().height()
-        # self.meta_w['ch_names'].sizeHint = lambda: QtCore.QSize(te_w, te_h)
-        # hide channel names
-        self.qform.itemAt(5, QtWidgets.QFormLayout.LabelRole).widget().setVisible(False)
-        self.qform.itemAt(5, QtWidgets.QFormLayout.FieldRole).widget().setVisible(False)
-    
-    def update_recording(self, recording):
-        self.recording = recording
-        if self.recording is None:
-            self.meta = dict.fromkeys(list(self.meta.keys()))
-        else:
-            self.meta['FS'] = self.recording.get_sampling_frequency()
-            self.meta['nsamples'] = self.recording.get_num_samples()
-            self.meta['duration'] = self.recording.get_duration()
-            self.meta['ch_names'] = self.recording.get_channel_ids().astype('str')
-            self.meta['total_ch'] = len(self.meta['ch_names'])
-            is_nwb = self.recording.__class__.__name__ == 'NwbRecordingExtractor'
-            if is_nwb:
-                es_name = os.path.basename(self.recording.electrical_series_path)
-                self.meta['ElectricalSeries'] = es_name
-            else:
-                self.meta['ElectricalSeries'] = None
-        self.update_gui_from_ddict(self.meta)
-        #txt = os.linesep.join([f'{k} = {v}' for k,v in self.meta.items()])
-        #self.setPlainText(txt)
-        #self.setVisible(self.recording is not None)
-    
-    def update_gui_from_ddict(self, ddict):
-        if ddict['FS'] is None:
-            for mw in self.meta_w.values():
-                mw.clear()
-        else:
-            self.meta_w['FS'].setText(f"{ddict['FS']:.1f} Hz")
-            self.meta_w['nsamples'].setText(f"{ddict['nsamples']:.0f}")
-            self.meta_w['duration'].setText(f"{ddict['duration']:.2f} s")
-            self.meta_w['total_ch'].setText(f"{ddict['total_ch']:.0f}")
-            self.meta_w['ch_names'].setPlainText(str(ddict['ch_names'])[1:-1])
-            es_name = ddict['ElectricalSeries']
-            is_nwb = bool(es_name is not None)
-            self.meta_w['ElectricalSeries'].setText(f'{str(es_name)}')
-            self.qform.itemAt(0, QtWidgets.QFormLayout.LabelRole).widget().setVisible(is_nwb)
-            self.qform.itemAt(0, QtWidgets.QFormLayout.FieldRole).widget().setVisible(is_nwb)
-            
-if __name__ == '__main__':
-    import sys
-    app = pyfx.qapp()
-    w = BaseFolderPopup()
-    w.show()
-    w.raise_()
-    sys.exit(app.exec())
         
