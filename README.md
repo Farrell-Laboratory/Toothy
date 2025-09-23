@@ -41,37 +41,23 @@ The Toothy workflow consists of three key steps: (1) **data ingestion**, in whic
 
 The "Step 1: Load data" window offers an interface for loading a recording file, associated probe configuration file, and triggering the automated pre-processing of the data. The processed data is saved in a new ```toothy``` output folder. Users can also set the analysis parameters for a given recording by expanding the "Settings" panel.
 
-<p align="center"><img align="right", src="_img/new_ingestion.png" width=40%/></p>
-
 ### <ins>Loading Data from a Supported Recording System</ins>
-
 <p></p>
-Toothy supports automatic data loading from the following acquisition systems:
+Toothy supports the following file formats:
 
 * **<ins>NeuroNexus</ins>:** data source must contain a ```.xdat.json``` metadata file
 * **<ins>OpenEphys</ins>:** data source must contain a ```structure.oebin``` metadata file
 * **<ins>Neuralynx</ins>:** data source must contain unique ```.ncs``` files for each channel
+* **<ins>Neurodata Without Borders (NWB)</ins>:** data source must contain unique ```.nwb``` file
+* **<ins>NumPy</ins>:** `.npy` file must contain at least one 2d array where rows/columns correspond to samples/channels (or vice versa)
+* **<ins>MATLAB</ins>:** `.mat` file must contain at least one 2d array where rows/columns correspond to samples/channels (or vice versa)
+<p align="center"><img src="_img/new_ingestion.png" width=40%/></p>
 
-<p><img align="left", src="_img/folder_color.png" width=2%/>: select raw data directory from a supported recording system</p>
-<p><img align="left", src="_img/load.png" width=2%/>: select raw data file in a supported format (see below)</p>
+When loading 2-dimensional data arrays (channels x timepoints) from ```.npy``` and ```.mat``` files, the user must provide metadata about the recording into a popup window.
 
-### <ins>Loading Data from a File</ins>
-
-<p align="center"><img align="right", src="_img/data_array_popup.png" width=35%/></p>
-
-To analyze electrophysiology signals from a non-supported recording system, Toothy can also load 2-dimensional data arrays (channels x timepoints) from ```.npy``` and ```.mat``` files. Since these files lack contextual metadata, the user must provide information about the recording into a popup window.
-
-<p></p>
-<b>Data Array:</b> label data dimensions and channel ordering
-
-* Specify whether data rows represent channels or time points
-* Specify whether the data channels are organized from shallowest to deepest (or vice versa)
-
-<p></p>
-<b>Recording:</b> set key recording parameters
-
-* Set the recording sampling rate (Hz); the recording duration is automatically calculated using the number of time points
+* Set the recording sampling rate (Hz)
 * Set the SI units (uV, mV, V, or kV) of the data
+<p align="center"><img src="_img/new_array.png" width=40%/></p>
 
 <hr>
 
