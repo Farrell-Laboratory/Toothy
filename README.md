@@ -325,7 +325,7 @@ The following sections provide helpful "convenience" interfaces that you can opt
 ### <ins>Set paths</ins>
 The "Set paths" window allows users to point Toothy towards default folders and files for data analysis. This information is stored in a ```default_folders.txt``` file, which is automatically generated the first time Toothy is run.
 
-<p align="center"><img src="_img/new_set_paths" width=50%/></p>
+<p align="center"><img src="_img/new_set_paths.png" width=50%/></p>
 
 <b><ins>Input data directory</ins>:</b> Select the directory where your recordings are stored; the first time you run Toothy, this will be set to the Toothy folder itself. Updating this location is optional but may make your workflow more convenient when selecting a recording for initial processing.
 
