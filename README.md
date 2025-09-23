@@ -39,9 +39,9 @@ The Toothy workflow consists of three key steps: (1) **data ingestion**, in whic
 
 # Data Ingestion
 
-The "Raw Data" window provides a pipeline for loading raw recordings, assigning probes, pre-processing the data, and saving the files in a new ```processed_data``` folder. Users can also set the analysis parameters for a given recording by expanding the "Settings" panel.
+The "Step 1: Load data" window offers an interface for loading a recording file, associated probe configuration file, and triggering the automated pre-processing of the data. The processed data is saved in a new ```toothy``` output folder. Users can also set the analysis parameters for a given recording by expanding the "Settings" panel.
 
-<p align="center"><img align="right", src="_img/raw_data_popup_npy.png" width=40%/></p>
+<p align="center"><img align="right", src="_img/new_ingestion.png" width=40%/></p>
 
 ### <ins>Loading Data from a Supported Recording System</ins>
 
