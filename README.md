@@ -65,7 +65,7 @@ When loading 2-dimensional data arrays (channels x timepoints) from ```.npy``` a
 
 After the raw data source is loaded, each data row must be mapped to a unique probe channel. The central panel shows all probes currently associated with the recording, and a dynamically updated text box (right) displays the total number of probe channels along with the number of data rows; these values must be identical in order to proceed.
 
-<p align="center"><img align="right", src="_img/raw_data_popup_probemap.png" width=35%/></p>
+<p align="center"><img align="right", src="_img/new_probe_selection.png" width=35%/></p>
 
 <p></p>
 <b>Assign probes to the recording:</b><br>
@@ -85,11 +85,11 @@ After the raw data source is loaded, each data row must be mapped to a unique pr
 
 * For unassigned rows, the "Probe" column is left blank
 
-<br><br>
+<br>
 
 # Analyzing the Recording
 
-The  "Data Analysis" window manages event channel selection and DS classification for processed recordings, which can be selected using the file button.
+The "Step 2: Analyze events" window manages event channel selection and DS classification for processed recordings, which can be selected using the file button.
 
 <p align="center"><img align="left", src="_img/analysis_popup.png" width=30%/></p>
 
@@ -266,9 +266,9 @@ Users compare event morphology between the primary channel and other candidate c
 
 When all event channel inputs are set to the optimal values, pressing the <ins>Save</ins> button will save the event data for the currently loaded shank and probe. Any probe shanks without saved data are missing from the following CSV tables and represented as empty lists in the event channel file.
 
-```theta_ripple_hil_chan_[PROBE].npy``` : a nested list of [theta, SPW-R, DS] channels for each shank in the probe
+```theta_ripple_hil_chan.npy``` : a nested list of [theta, SPW-R, DS] channels for each probe and shank
 
-```DS_DF_[PROBE]``` and ```SWR_DF_[PROBE]``` : CSV files containing DS and SPW-R datasets for the probe
+```DS_DF_probe[PROBE]-shank[SHANK]``` and ```SWR_DF_probe[PROBE]-shank[SHANK]``` : CSV files containing DS and SPW-R datasets for the probe
 
 <br><br>
 
