@@ -16,9 +16,9 @@ cd [PATH_TO_TOOTHY_FOLDER]
 
 **4) Create a new Anaconda environment for the Toothy application using the provided ```environment.yml``` file. The following command creates a Python 3.11 environment called "toothy_env"  and installs all the necessary dependencies.**
 ```
-conda env create -f environment.yml
+conda env create environment.yml
 ```
-*If you already have an environment called `toothy_env`, remove it first by running: `conda remove --name toothy_env --all`*
+*If you already have an environment called `toothy_env`, remove it first by running: `conda remove --name toothy_env --all` or change the name of the environment inside `environment.yml`.*
 
 **5) Activate the environment.**
 ```
@@ -33,91 +33,6 @@ python toothy.py
 <br>
 
 # Getting Started
-
-### <ins>Set the "Base Folders"</ins>
-The "Base Folders" window allows users to set default folders and files for data analysis. This information is stored in a ```default_folders.txt``` file, which is automatically generated upon startup.
-
-<p align="center"><img src="_img/base_folders.png" width=50%/></p>
-
-<b><ins>Raw Data Folder</ins>:</b> Select the directory where your raw data files are stored; the default location is the Toothy folder itself. Updating this location is optional but convenient when selecting raw recording data for initial processing.
-
-<b><ins>Probe Configuration Folder</ins>:</b> Select the directory where your probe configuration files will be stored. The application automatically creates a ```probe_configs``` directory within the Toothy folder and creates a ```demo_probe_config.json``` file as an example probe object.
-
-<b><ins>Default Probe File</ins>:</b> If your recordings tend to use the same probe, you can optionally select a default probe configuration file that will be automatically loaded during the data processing phase. If this field is blank (the default state), probes will be loaded manually for each recording.
-
-<p>
-<b><ins>Parameter File</ins>:</b> Select the TXT file containing the parameter values that you want to use for data processing. The application automatically generates a <code>default_params.txt</code> file with reasonable initial values, which can be changed in the next step. To generate a new parameter file with default values, press the <img src="_img/load_txt.png" width=2%/> button.
-</p>
-
----
-
-### <ins>Set the analysis parameters</ins>
-The "Parameters" window allows users to view and edit the parameters used for data processing and analysis, which are stored in the TXT file specified in the previous step.
-
-<p align="center"><img src="_img/parameters.png" width=35%/></p>
-
-A short description of each parameter can be displayed by hovering over its label, and changes can be saved either to the current parameter file or as a new TXT file.
-
-<br>
-
-# Probe Creation
-
-The probe designer uses the ```probeinterface``` Python package to create a software representation of the electrode geometry and channel mapping of specific neural probes, which is stored as a JSON file. The <b>"Build"</b> window can be used to create a probe completely from scratch by specifying number of channels and electrode geometry, while the <b>"Paste"</b> window accepts input lists of x and y-coordinates.
-
-**<ins>"Build"</ins>**
-<p align="center"><img align="left", src="_img/probe_builder.png" width=30%/></p>
-
-1) Set the number of channels and the number of shanks. For multi-shank probes, the number of channels per shank and the shank spacing (um) must also be specified.
-
-2) Set the electrode geometry as a Linear/Edge configuration (one electrode column per shank), a Polytrode configuration (2+ columns per shank), or a Tetrode configuration (groups of 4 closely spaced electrodes).
-
-3) Set the electrode spacing for the specified probe configuration.
-* <ins>Inter-electrode spacing</ins>: distance between electrodes along the shank (*linear/polytrode*)
-* <ins>Intra-electrode spacing</ins>: distance between electrodes across the shank (*polytrode*)
-* <ins>Inter-site spacing</ins>: distance between tetrode recording sites along the shank (*tetrode*)
-* <ins>Intra-site spacing</ins>: distance between the most lateral (X) and vertical (Y) electrodes within a single recording site (*tetrode*)
-* <ins>Tip offset</ins>: distance between the tip of the shank and the deepest electrode (*linear/polytrode*) or recording site (*tetrode*). For polytrodes, this parameter can be set individually for each column.
-  
-4) Set the electrode contact shape (circles, squares, or rectangles) and size (area/radius/width/height).
-
-<br><br>
-
-**<ins>"Paste"</ins>**
-<p align="center"><img align="left", src="_img/probe_builder2.png" width=30%/></p>
-
-1) Input lists of comma-separated x-coordinates and y-coordinates corresponding to each channel.
-
-2) Set the shank ID for each channel by entering another list into the text field, or by pressing the "Set..." button to manually map each unique x-coordinate to a shank ID.
-   
-3) Set the electrode contact shape and size.
-
-<br>
-
-**<ins>Channel Mapping:</ins>** set the device indices for mapping the contact indices of the probe to the logical channel indices of the recording device; this depends on the wiring of the particular probe and headstage. Data may be entered as comma-separated values ("Text field") or as values in a table column ("Table")
-
-* If the "Channel Mapping" box is left unchecked, Toothy will assume that the Nth electrode contact corresponds to the Nth row of raw data
-
-* When creating a probe from x and y data, the "Use coordinates" button enables automatic mapping of the contact indices to the physical channel positions. For instance, device index 0 is the index of the shallowest contact (maximum y-value) on the leftmost electrode column (minimum x-value) in the inputted lists of x and y-coordinates
-
-<p align="center"><img align="right", src="_img/example_probe_plot.png" width=35%/></p>
-
-<br><br>
-
-**<ins>Actions</ins>**
-
-When all necessary probe parameters have been supplied, the **<ins>Generate</ins>** button (bottom row) will create a ```probeinterface.Probe``` object and launch a pop-up window with a visual representation of the probe. This external plot can interactively display the contact indices, device indices, and shank IDs over each channel to ensure that the configuration is correct.
-
-<ins>Other Buttons</ins>
-
-**<ins>Load:</ins>** load existing probe configuration file into the "Build" or "Paste" window
-
-**<ins>Plot:</ins>** view the current probe in the external plotting window
-
-**<ins>Save:</ins>** save the current probe as a JSON configuration file
-
-**<ins>Clear:</ins>** reset all probe parameters to their default states
-
-<br><br>
 
 # Data Ingestion
 
@@ -403,3 +318,91 @@ The <i><ins>CSD slider</ins></i> controls the range of the CSD window (cyan), wh
   <img src="_img/ds_by_type.png" width=32%/> &nbsp;
   <img src="_img/pca_plot.png" width=32%/>
 </p>
+
+# Convenience
+The following sections provide helpful "convenience" interfaces that you can optionally use to make your Toothy workflow smoother: (1) Setting paths for file searching, (2) Setting parameters, and (3) Creating probe configuration files. All three of these features are also built-in to the normal Toothy workflow.
+
+### <ins>Set paths</ins>
+The "Set paths" window allows users to point Toothy towards default folders and files for data analysis. This information is stored in a ```default_folders.txt``` file, which is automatically generated the first time Toothy is run.
+
+<p align="center"><img src="_img/new_set_paths" width=50%/></p>
+
+<b><ins>Input data directory</ins>:</b> Select the directory where your recordings are stored; the first time you run Toothy, this will be set to the Toothy folder itself. Updating this location is optional but may make your workflow more convenient when selecting a recording for initial processing.
+
+<b><ins>Probe configurations directory</ins>:</b> Select the directory where your probe configuration files are stored. The first time you run Toothy, the application automatically creates a ```probe_configs``` directory within the Toothy folder and creates a ```demo_probe_config.json``` file as an example probe object.
+
+<b><ins>Prefered probe configuration file</ins>:</b> Select a probe configuration file to have automatically loaded during data processing. If your recordings tend to use the same probe, selecting a probe configuration file may be convenient. Even if a file is selected here, the specific probe configuration used for processing a given file can be changed during the data ingestion stage. If this field is left empty, the user will select a probe manually for each recording.
+
+<p>
+<b><ins>Parameter file</ins>:</b> Select the TXT file containing the parameter values that you want to use for data processing. The application automatically generates a <code>default_params.txt</code> file with reasonable initial values, which can be changed in the next step. To generate a new parameter file with default values, press the <img src="_img/magic-wand.png" width=2%/> button.
+</p>
+
+---
+
+### <ins>Set the analysis parameters</ins>
+The "Parameters" window allows users to view and edit the parameters used for data processing and analysis, which are stored in the TXT file specified in the previous step.
+
+<p align="center"><img src="_img/parameters.png" width=35%/></p>
+
+A short description of each parameter can be displayed by hovering over its label, and changes can be saved either to the current parameter file or as a new TXT file.
+
+<br>
+
+# Probe Creation
+
+The probe designer uses the ```probeinterface``` Python package to create a software representation of the electrode geometry and channel mapping of specific neural probes, which is stored as a JSON file. The <b>"Build"</b> window can be used to create a probe completely from scratch by specifying number of channels and electrode geometry, while the <b>"Paste"</b> window accepts input lists of x and y-coordinates.
+
+**<ins>"Build"</ins>**
+<p align="center"><img align="left", src="_img/probe_builder.png" width=30%/></p>
+
+1) Set the number of channels and the number of shanks. For multi-shank probes, the number of channels per shank and the shank spacing (um) must also be specified.
+
+2) Set the electrode geometry as a Linear/Edge configuration (one electrode column per shank), a Polytrode configuration (2+ columns per shank), or a Tetrode configuration (groups of 4 closely spaced electrodes).
+
+3) Set the electrode spacing for the specified probe configuration.
+* <ins>Inter-electrode spacing</ins>: distance between electrodes along the shank (*linear/polytrode*)
+* <ins>Intra-electrode spacing</ins>: distance between electrodes across the shank (*polytrode*)
+* <ins>Inter-site spacing</ins>: distance between tetrode recording sites along the shank (*tetrode*)
+* <ins>Intra-site spacing</ins>: distance between the most lateral (X) and vertical (Y) electrodes within a single recording site (*tetrode*)
+* <ins>Tip offset</ins>: distance between the tip of the shank and the deepest electrode (*linear/polytrode*) or recording site (*tetrode*). For polytrodes, this parameter can be set individually for each column.
+  
+4) Set the electrode contact shape (circles, squares, or rectangles) and size (area/radius/width/height).
+
+<br><br>
+
+**<ins>"Paste"</ins>**
+<p align="center"><img align="left", src="_img/probe_builder2.png" width=30%/></p>
+
+1) Input lists of comma-separated x-coordinates and y-coordinates corresponding to each channel.
+
+2) Set the shank ID for each channel by entering another list into the text field, or by pressing the "Set..." button to manually map each unique x-coordinate to a shank ID.
+   
+3) Set the electrode contact shape and size.
+
+<br>
+
+**<ins>Channel Mapping:</ins>** set the device indices for mapping the contact indices of the probe to the logical channel indices of the recording device; this depends on the wiring of the particular probe and headstage. Data may be entered as comma-separated values ("Text field") or as values in a table column ("Table")
+
+* If the "Channel Mapping" box is left unchecked, Toothy will assume that the Nth electrode contact corresponds to the Nth row of raw data
+
+* When creating a probe from x and y data, the "Use coordinates" button enables automatic mapping of the contact indices to the physical channel positions. For instance, device index 0 is the index of the shallowest contact (maximum y-value) on the leftmost electrode column (minimum x-value) in the inputted lists of x and y-coordinates
+
+<p align="center"><img align="right", src="_img/example_probe_plot.png" width=35%/></p>
+
+<br><br>
+
+**<ins>Actions</ins>**
+
+When all necessary probe parameters have been supplied, the **<ins>Generate</ins>** button (bottom row) will create a ```probeinterface.Probe``` object and launch a pop-up window with a visual representation of the probe. This external plot can interactively display the contact indices, device indices, and shank IDs over each channel to ensure that the configuration is correct.
+
+<ins>Other Buttons</ins>
+
+**<ins>Load:</ins>** load existing probe configuration file into the "Build" or "Paste" window
+
+**<ins>Plot:</ins>** view the current probe in the external plotting window
+
+**<ins>Save:</ins>** save the current probe as a JSON configuration file
+
+**<ins>Clear:</ins>** reset all probe parameters to their default states
+
+<br><br>
