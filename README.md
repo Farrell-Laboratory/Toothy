@@ -308,6 +308,44 @@ The <i><ins>CSD slider</ins></i> controls the range of the CSD window (cyan), wh
   <img src="_img/pca_plot.png" width=32%/>
 </p>
 
+# Output 
+Toothy returns a set of `.csv` files with event times and properties. One file is generated per event type, probe, and shank. For example, if you have two probes each with two shanks and perform channel selection on all of them, you will have 8 output files. Each file includes the following columns: 
+
+**DS_DF** files:
+| Columnn | Description|
+|---|---|
+|`ch`| Index of the selected DS channel on the given probe and shank|
+|`time`| Time of event peak (seconds). If timestamps were not provided, these times reflect an internally-generated timestamp that may not correspond to the original data; use event indices instead (see column `idx`).|
+|`amp`| Amplitude of event peak (mV) |
+|`half_width`| Event width at 0.5 the prominence (ms) |
+|`width_height`| Event height at 0.5 the prominence (mV) |
+|`asym`| Event asymmetry. 0 is symmetric about the peak; positive values extend longer to the right than left; negative values extend longer to the left than the right | 
+|`prom`| Prominence of event peak. See [`scipy.signal.peak_prominences`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.peak_prominences.html#scipy.signal.peak_prominences) for description.|
+|`start`| Event start time (s), defined as the time at 0.5 the prominence prior to the peak | 
+|`stop`| Event stop time (s), defined as the time at 0.5 the prominence after the peak | 
+|`idx`| Index of event peak. If downsampling was *not* performed, indices correspond to samples in the original recording. Otherwise, indices correspond to samples in the downsampled recording.|
+|`idx_start`| Index of event start. See notes on `idx`.|
+|`idx_stop`| Index of event stop. See notes on `idx`.|
+|`type`| Types according to the selected clustering method. 1 = DS1, 2 = DS2, 0 = neither. 0 is only possible when clustering using DBSCAN.|
+|`k_type`| Types according to k-means clustering |
+|`db_type`| Types according to DBSCAN clustering |
+
+**SWR_DF** files:
+| Columnn | Description|
+|---|---|
+|`ch`| Index of the selected SWR channel on the given probe and shank|
+|`time`| Time of largest positive cycle (seconds). If timestamps were not provided, these times reflect an internally-generated timestamp that may not correspond to the original data; use event indices instead (see column `idx`).|
+|`amp`| Amplitude of ripple envelope peak (mV) |
+|`dur`| Duration (ms) | 
+|`freq`| SWR instantaneous frequency | 
+|`start`| Event start time (s)| 
+|`stop`| Event stop time (s) | 
+|`idx`| Index of largest ripple oscilation in the LFP. If downsampling was *not* performed, indices correspond to samples in the original recording. Otherwise, indices correspond to samples in the downsampled recording.|
+|`idx_peak`| Index of the peak in the ripple envelope.|
+|`idx_start`| Index of event start. See notes on `idx`.|
+|`idx_stop`| Index of event stop. See notes on `idx`.|
+
+
 # Convenience
 The following sections provide helpful "convenience" interfaces that you can optionally use to make your Toothy workflow smoother: (1) Setting paths for file searching, (2) Setting parameters, and (3) Creating probe configuration files. All three of these features are also built-in to the normal Toothy workflow.
 
