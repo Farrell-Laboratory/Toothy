@@ -6,7 +6,7 @@ The following file is a Neurodata Without Borders (.nwb) file, trimmed from the 
 - Source: Allen Institute Visual Coding Neuropixels dataset
 - Session ID: 829720705, Probe F
 - Sampling rate: 1250 Hz
-- Duration: 10 mins (trimmed from original, starts at approximately 1h)
+- Duration: 4 mins (trimmed from original, starts at approximately 1h)
 
 
 ## Probe configuration:
