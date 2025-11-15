@@ -1,5 +1,10 @@
 # Toothy: a graphical user interface for curating dentate spikes
 
+**Sign up [here](https://forms.gle/HrLHXZmY4nZJG1Y38) to be notified about Toothy!
+
+<p align="left"><img src="_img/logo.png" width=35%/></p>
+
+
 # Installation
 **1) Download Miniconda or Anaconda Navigator**
 * Miniconda: https://docs.anaconda.com/miniconda/miniconda-install/
