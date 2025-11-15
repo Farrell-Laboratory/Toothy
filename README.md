@@ -1,6 +1,6 @@
 # Toothy: a graphical user interface for curating dentate spikes
 
-**Sign up [here](https://forms.gle/HrLHXZmY4nZJG1Y38) to be notified about Toothy!
+**Sign up [here](https://forms.gle/HrLHXZmY4nZJG1Y38) to be notified about Toothy!**
 
 <p align="left"><img src="_img/logo.png" width=35%/></p>
 
