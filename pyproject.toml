@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling >= 1.26"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/toothy"]
+
+[project]
+name = "toothy"
+version = "0.0.1"
+authors = [
+{name = "Kathleen Esfahany", email = "kathleen.esfahany@gmail.com"},
+{name = "Amanda Schott"}
+]
+description = "A graphical user interface for dentate spike detection and curation"
+dependencies = [
+    "numpy==1.26.0",
+    "pandas==2.1.1",
+    "matplotlib==3.8.0",
+    "scipy==1.13.1",
+    "scikit-learn==1.2.2",
+    "pyqt5==5.15.10",# -> pyqt to pyqt5
+    "h5py==3.9.0",
+    "neo==0.14.1",
+    "quantities>=0.16.1",
+    "seaborn==0.13.0",
+    "ipython==8.12.3",
+    "open-ephys-python-tools==0.1.10",
+    "probeinterface==0.2.23",
+    "spikeinterface==0.102.3"
+]
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+license = "MIT"
+license-files = ["LICEN[CS]E*"]
+
+[project.urls]
+Homepage = "https://github.com/Farrell-Laboratory/Toothy"
+Repository = "https://github.com/Farrell-Laboratory/Toothy"
+
+[project.scripts]
+toothy = "toothy.toothy:main"

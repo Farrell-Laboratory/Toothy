@@ -2,5 +2,11 @@
 /__pycache__
 default_folders.txt
 default_params.txt
+toothy_paths.txt
+toothy_default_parameters.json
 /probe_configs
 /icons
+/resources
+dist/
+build/
+*.egg-info/

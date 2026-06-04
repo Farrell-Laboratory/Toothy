@@ -1,0 +1,10 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+  <qresource>
+    <file>resources/logo.png</file>
+    <file>resources/folder.png</file>
+    <file>resources/load-file.png</file>
+    <file>resources/magic-wand.png</file>
+    <file>resources/clear-selection.png</file>
+  </qresource>
+</RCC>
