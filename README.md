@@ -2,6 +2,8 @@
 
 <p align="left"><img src="_img/logo.png" width=35%/></p>
 
+[Watch a basic video tutorial here!](https://youtu.be/ReGkIQomnYE)
+
 # Installation
 Requires Python 3.11.
 
