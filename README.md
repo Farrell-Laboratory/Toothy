@@ -2,8 +2,6 @@
 
 <p align="left"><img src="_img/logo.png" width=35%/></p>
 
-[Watch a basic video tutorial here!](https://youtu.be/ReGkIQomnYE)
-
 # Installation
 Requires Python 3.11.
 
@@ -35,6 +33,14 @@ On first launch, Toothy creates `toothy_paths.txt`, `probe_configs/`, and `tooth
 
 
 # Getting Started
+[Watch a basic video tutorial here!](https://youtu.be/ReGkIQomnYE)
+
+<p align="center">
+  <a href="https://youtu.be/ReGkIQomnYE">
+    <img src="_img/video_prev.png" alt="Watch the video" width="600">
+  </a>
+</p>
+
 The Toothy workflow consists of three key steps: (1) **data ingestion**, in which you select a recording and relevant metadata, (2) **channel selection**, in which you pick the best channel for hippocampal events based on the properties of the events detected on each channel, and (3) **DS classification**, in which you set clustering parameters to classify DSs into DS1/DS2. To begin, click "Step 1: Load data" on the Toothy home screen.
 
 <p align="center"><img src="_img/toothy_home.png" width=40%/></p>
